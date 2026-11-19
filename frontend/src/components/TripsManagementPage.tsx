@@ -9,6 +9,7 @@ import {
   LayersIcon,
   Loader2Icon,
   MapIcon,
+  PrinterIcon,
   RefreshCwIcon,
   RouteIcon,
   SearchIcon,
@@ -36,6 +37,10 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet"
 import { toast } from "@/components/ui/sonner"
+import {
+  DispatchManifestModal,
+  type ManifestTarget,
+} from "@/components/DispatchManifestModal"
 import {
   algorithmLabel,
   api,
@@ -82,6 +87,7 @@ export interface JobGroupItem {
   dataset: string
   algorithm: string
   departureTime?: number
+  latestDeparture?: number
   totalVehicles: number
   totalStopsCount: number
   assignedCount: number
@@ -174,6 +180,11 @@ export function TripsManagementPage({
   const [detailLoading, setDetailLoading] = useState(false)
   const [detailError, setDetailError] = useState<string | null>(null)
 
+  // Manifest print modal target state
+  const [manifestTarget, setManifestTarget] = useState<ManifestTarget | null>(
+    null
+  )
+
   // Build grouped data by Job (Chuyến)
   const jobGroups = useMemo<JobGroupItem[]>(() => {
     return adminJobs.map((group) => {
@@ -261,6 +272,7 @@ export function TripsManagementPage({
         dataset,
         algorithm,
         departureTime: plan.departure_time,
+        latestDeparture: plan.latest_departure,
         totalVehicles,
         totalStopsCount,
         assignedCount,
@@ -730,7 +742,10 @@ export function TripsManagementPage({
                         {job.departureTime != null && (
                           <>
                             <span>•</span>
-                            <span>Khởi hành sớm nhất: {clock(job.departureTime)}</span>
+                            <span>
+                              Khung giờ xuất phát: {clock(job.departureTime)}
+                              {job.latestDeparture != null ? ` – ${clock(job.latestDeparture)}` : ""}
+                            </span>
                           </>
                         )}
                         <span>•</span>
@@ -920,6 +935,28 @@ export function TripsManagementPage({
                                       >
                                         <MapIcon data-icon="inline-start" />
                                         Bản đồ
+                                      </Button>
+
+                                      <Button
+                                        type="button"
+                                        variant="outline"
+                                        size="xs"
+                                        disabled={isRowBusy}
+                                        title="In lệnh điều phối & phiếu bàn giao khổ A4"
+                                        onClick={() =>
+                                          setManifestTarget({
+                                            jobId: row.jobId,
+                                            routeIndex: row.routeIndex,
+                                            vehicle: row.vehicle,
+                                            algorithm: row.algorithm,
+                                            tripName: row.tripName,
+                                            dataset: row.dataset,
+                                            trip: trip,
+                                          })
+                                        }
+                                      >
+                                        <PrinterIcon data-icon="inline-start" />
+                                        In lệnh
                                       </Button>
 
                                       {trip && (
@@ -1169,7 +1206,28 @@ export function TripsManagementPage({
             )}
 
             {detailTrip && (
-              <div className="mt-auto flex justify-end pt-2">
+              <div className="mt-auto flex flex-wrap justify-end gap-2 pt-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setManifestTarget({
+                      jobId: detailTrip.job_id,
+                      routeIndex: detailTrip.route_index,
+                      vehicle: detailTrip.route_index + 1,
+                      algorithm: detailTrip.algorithm,
+                      tripName:
+                        detailTrip.plan?.trip_name ||
+                        `Chuyến ${detailTrip.job_id.slice(0, 8)}`,
+                      dataset: detailTrip.plan?.dataset,
+                      trip: detailTrip,
+                    })
+                  }}
+                >
+                  <PrinterIcon data-icon="inline-start" />
+                  In lệnh giao hàng
+                </Button>
                 <Button
                   type="button"
                   size="sm"
@@ -1187,6 +1245,13 @@ export function TripsManagementPage({
           </div>
         </SheetContent>
       </Sheet>
+
+      {/* A4 Dispatch Manifest Modal */}
+      <DispatchManifestModal
+        open={Boolean(manifestTarget)}
+        onClose={() => setManifestTarget(null)}
+        target={manifestTarget}
+      />
     </div>
   )
 }

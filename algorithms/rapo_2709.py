@@ -42,6 +42,7 @@ class RAPO2709Config:
     aos_alpha: float = 0.20
     # Giữ 0 để không thay đổi các benchmark cũ; web app truyền 08:00.
     earliest_departure: float = 0.0
+    latest_departure: float | None = None
     # Benchmark công bằng dùng exact Split giống TDVRPProblem. App cũ có thể
     # giữ False để dùng proxy time-zero nhanh hơn.
     exact_split: bool = False
@@ -58,6 +59,8 @@ class RAPO2709Config:
             raise ValueError("criticality_floor không được âm")
         if not 0 <= self.elite_budget_fraction <= 1:
             raise ValueError("elite_budget_fraction phải thuộc [0, 1]")
+        if self.latest_departure is not None and self.latest_departure < self.earliest_departure:
+            raise ValueError("latest_departure phải lớn hơn hoặc bằng earliest_departure")
         if not 0 <= self.aos_epsilon <= 1 / len(ELITE_OPERATORS):
             raise ValueError("aos_epsilon quá lớn so với số toán tử Elite")
         if not 0 < self.aos_alpha <= 1:
@@ -137,6 +140,7 @@ class _ExactSplitEvaluator:
         graph: tuple[dict[int, RoadNode], dict[str, RoadEdge]],
         traffic: TrafficOverlay,
         earliest_departure: float = 0.0,
+        latest_departure: float | None = None,
         exact_split: bool = False,
     ) -> None:
         if instance.arrival_time_functions is None:
@@ -148,6 +152,7 @@ class _ExactSplitEvaluator:
         self.graph = graph
         self.traffic = traffic
         self.earliest_departure = float(earliest_departure)
+        self.latest_departure = float(latest_departure) if latest_departure is not None else None
         self.exact_split = bool(exact_split)
         self.atfs = instance.arrival_time_functions
         self.route_cache: dict[tuple[int, ...], _RouteState | None] = {}
@@ -278,9 +283,12 @@ class _ExactSplitEvaluator:
         if not customers:
             return None
         start, end = self.instance.horizon
-        start = max(start, self.earliest_departure)
-        if start >= end:
-            raise ValueError("earliest_departure phải nhỏ hơn cuối horizon")
+        start = max(float(start), self.earliest_departure)
+        if self.latest_departure is not None:
+            end = min(float(end), self.latest_departure)
+        end = float(end)
+        if start > end:
+            raise ValueError("earliest_departure phải nhỏ hơn hoặc bằng latest_departure (và cuối horizon)")
         depot = self.instance.depot
         accumulator = None
         previous = depot
@@ -748,6 +756,7 @@ def optimize(
         graph,
         traffic,
         earliest_departure=config.earliest_departure,
+        latest_departure=config.latest_departure,
         exact_split=config.exact_split,
     )
     ledger = _NFELedger(evaluator, config.max_function_evaluations)

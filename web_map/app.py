@@ -223,9 +223,8 @@ def load_data(key, exact=False):
     """Preview không dựng ATF; khi tối ưu mới dựng và xác minh ATF."""
     if key.startswith('hcmc'):
         instance = load_instance(DATASETS[key], validate_sidecars=True)
-        graph = load_road_graph(instance.graph_path)
-        prepare_adjacency(graph)
-        traffic = load_traffic(instance.traffic_path, graph[1])
+        graph, traffic, graph_path = _load_hcmc_network()
+        instance = _snap_instance_to_graph(instance, graph, graph_path)
         return instance, graph, traffic
     return load_poryos(DATASETS[key], verify_checksums=True,
                        allow_proxy=False, materialize_atfs=exact)
@@ -692,7 +691,8 @@ def run_job(job_id, config):
                 if algorithm == 'RAPO-2709':
                     result = optimize(instance, graph, traffic, config=RAPO2709Config(
                         population_size=config['population_size'], max_function_evaluations=config['budget'],
-                        seed=seed, earliest_departure=config['earliest_departure']),
+                        seed=seed, earliest_departure=config['earliest_departure'],
+                        latest_departure=config.get('latest_departure')),
                         initial_population=population)
                 elif algorithm == 'HCMC-TD-ERAPO':
                     def on_hcmc_progress(evals, budget, current_fitness):
@@ -706,6 +706,7 @@ def run_job(job_id, config):
                             population_size=config['population_size'],
                             max_function_evaluations=config['budget'],
                             earliest_departure=config['earliest_departure'],
+                            latest_departure=config.get('latest_departure'),
                             seed=seed,
                         ),
                         seed=seed,
@@ -716,7 +717,8 @@ def run_job(job_id, config):
                     result = run_baseline(algorithm, instance, graph, traffic,
                         instance_path=DATASETS[config['dataset']], population_size=config['population_size'],
                         nfe_budget=config['budget'], seed=seed, initial_population=population,
-                        start_time=config['earliest_departure'])
+                        start_time=config['earliest_departure'],
+                        latest_time=config.get('latest_departure'))
                 evaluation_seconds = time.perf_counter() - algorithm_start
                 evaluation = result.best_evaluation
                 if not evaluation.feasible or not math.isfinite(evaluation.fitness):
@@ -938,6 +940,7 @@ def extract_plan_metadata(job_id: str, preferred_algorithm: str = None) -> dict:
         'instance': saved.get('instance'),
         'trip_name': saved_config.get('trip_name'),
         'departure_time': saved_config.get('earliest_departure'),
+        'latest_departure': saved_config.get('latest_departure'),
         'algorithm': alg_name,
         'total_routes': len(routes),
         'routes_summary': routes_summary,
@@ -1264,10 +1267,17 @@ def start_run():
     # Client cũ không gửi số seed vẫn chạy một lần như trước.
     config.setdefault('num_seeds', 1)
     config.setdefault('earliest_departure', 8 * 3600)
+    config.setdefault('latest_departure', min(86399, config['earliest_departure'] + 3600))
     for key, low, high in [('population_size', 2, 50), ('budget', 2, 10000), ('seed', 0, 999999), ('num_seeds', 1, 100), ('earliest_departure', 0, 86399)]:
         value = config.get(key)
         if type(value) is not int or not low <= value <= high:
             return jsonify(error=f'{key} phải là số nguyên từ {low} đến {high}'), 400
+    latest_departure = config.get('latest_departure')
+    if latest_departure is not None:
+        if type(latest_departure) is not int or not 0 <= latest_departure <= 86399:
+            return jsonify(error='latest_departure phải là số nguyên từ 0 đến 86399'), 400
+        if latest_departure < config['earliest_departure']:
+            return jsonify(error='Giờ xuất phát muộn nhất phải lớn hơn hoặc bằng giờ xuất phát sớm nhất'), 400
     if config['budget'] < config['population_size']:
         return jsonify(error='NFE phải lớn hơn hoặc bằng population size'), 400
     if config['seed'] + config['num_seeds'] - 1 > 999999:
@@ -1292,6 +1302,8 @@ def start_run():
         return jsonify(error='Thiếu sidecar: ' + ', '.join(missing)), 422
     config = {key: config[key] for key in ('dataset', 'population_size', 'budget', 'seed', 'num_seeds', 'earliest_departure')} | {
         'algorithms': list(dict.fromkeys(algorithms)), 'trip_name': trip_name}
+    if latest_departure is not None:
+        config['latest_departure'] = latest_departure
     if custom_points is not None:
         config['custom_points'] = custom_points
     with JOB_LOCK:

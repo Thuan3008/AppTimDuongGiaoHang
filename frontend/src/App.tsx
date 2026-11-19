@@ -180,6 +180,7 @@ export function App() {
   const [seed, setSeed] = useState("0")
   const [numSeeds, setNumSeeds] = useState("1")
   const [earliestDeparture, setEarliestDeparture] = useState("08:00")
+  const [latestDeparture, setLatestDeparture] = useState("09:00")
 
   // Optimization, Map & Trips state
   const [busy, setBusy] = useState(false)
@@ -369,6 +370,9 @@ export function App() {
       const depSeconds =
         config.earliest_departure == null ? 8 * 3600 : config.earliest_departure
       setEarliestDeparture(inputTime(depSeconds) || "08:00")
+      if (config.latest_departure != null) {
+        setLatestDeparture(inputTime(config.latest_departure) || "09:00")
+      }
 
       const custom = config.custom_points
       setManualMode(Boolean(custom))
@@ -1180,6 +1184,15 @@ export function App() {
   // ---------------------------------------------------------------------------
   const handleStartOptimization = async () => {
     const depSeconds = timeSeconds(earliestDeparture || "08:00") ?? 8 * 3600
+    const latestDepSeconds = latestDeparture ? (timeSeconds(latestDeparture) ?? undefined) : undefined
+    if (latestDepSeconds !== undefined && latestDepSeconds < depSeconds) {
+      setStatus("Giờ xuất phát muộn nhất phải lớn hơn hoặc bằng giờ sớm nhất", true)
+      toast.error("Khung giờ xuất phát không hợp lệ", {
+        description: "Giờ xuất phát muộn nhất phải sau hoặc bằng giờ xuất phát sớm nhất.",
+      })
+      return
+    }
+
     const config: OptimizationConfig = {
       trip_name: tripName.trim(),
       dataset,
@@ -1189,6 +1202,7 @@ export function App() {
       seed: Number(seed),
       num_seeds: Number(numSeeds),
       earliest_departure: depSeconds,
+      ...(latestDepSeconds !== undefined ? { latest_departure: latestDepSeconds } : {}),
     }
 
     try {
@@ -1490,6 +1504,7 @@ export function App() {
       seed={seed}
       numSeeds={numSeeds}
       earliestDeparture={earliestDeparture}
+      latestDeparture={latestDeparture}
       allTrips={allTrips}
       adminJobs={adminJobs}
       currentJobId={currentJobId}
@@ -1575,6 +1590,7 @@ export function App() {
       onSeedChange={setSeed}
       onNumSeedsChange={setNumSeeds}
       onEarliestDepartureChange={setEarliestDeparture}
+      onLatestDepartureChange={setLatestDeparture}
       onStartOptimization={() => void handleStartOptimization()}
       onCreateDriver={handleCreateDriver}
       onOpenDriversPage={() => {

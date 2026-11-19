@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react"
+// import { useState, type FormEvent } from "react"
 import {
   ArrowLeftIcon,
   CheckCircle2Icon,
@@ -7,8 +7,8 @@ import {
   MapIcon,
   PlayIcon,
   RouteIcon,
-  UserPlusIcon,
-  UsersIcon,
+  // UserPlusIcon,
+  // UsersIcon,
 } from "lucide-react"
 
 import { ManualPointsEditor } from "@/components/ManualPointsEditor"
@@ -66,6 +66,7 @@ interface DispatchSidebarProps {
   seed: string
   numSeeds: string
   earliestDeparture: string
+  latestDeparture: string
   allTrips: Trip[]
   adminJobs: AdminJobGroup[]
   currentJobId: string | null
@@ -97,6 +98,7 @@ interface DispatchSidebarProps {
   onSeedChange: (value: string) => void
   onNumSeedsChange: (value: string) => void
   onEarliestDepartureChange: (value: string) => void
+  onLatestDepartureChange: (value: string) => void
   onStartOptimization: () => void
   onCreateDriver: (
     fullName: string,
@@ -139,6 +141,7 @@ export function DispatchSidebar({
   seed,
   numSeeds,
   earliestDeparture,
+  latestDeparture,
   allTrips,
   adminJobs,
   currentJobId,
@@ -170,19 +173,13 @@ export function DispatchSidebar({
   onSeedChange,
   onNumSeedsChange,
   onEarliestDepartureChange,
+  onLatestDepartureChange,
   onStartOptimization,
-  onCreateDriver,
-  onOpenDriversPage,
   onOpenTripsPage,
   onOpenTrip,
   onStartTrip,
   onViewAllJobRoutes,
 }: DispatchSidebarProps) {
-  const [newDriverFullName, setNewDriverFullName] = useState("")
-  const [newDriverUsername, setNewDriverUsername] = useState("")
-  const [newDriverPassword, setNewDriverPassword] = useState("")
-  const [creatingDriver, setCreatingDriver] = useState(false)
-
   const isAdmin = user.role === "admin"
   const seedNum = Number(seed) || 0
   const numSeedsNum = Math.max(1, Number(numSeeds) || 1)
@@ -190,25 +187,6 @@ export function DispatchSidebar({
     numSeedsNum > 1
       ? `Chạy ${numSeedsNum} seed liên tiếp: ${seedNum} → ${seedNum + numSeedsNum - 1}. Hiển thị nghiệm tốt nhất.`
       : `Chạy 1 seed (seed=${seedNum}).`
-
-  const handleDriverSubmit = async (e: FormEvent) => {
-    e.preventDefault()
-    setCreatingDriver(true)
-    try {
-      const ok = await onCreateDriver(
-        newDriverFullName.trim(),
-        newDriverUsername.trim(),
-        newDriverPassword
-      )
-      if (ok) {
-        setNewDriverFullName("")
-        setNewDriverUsername("")
-        setNewDriverPassword("")
-      }
-    } finally {
-      setCreatingDriver(false)
-    }
-  }
 
   // Build grouped list matching web_map/static/js/trips.js
   const groups: AdminJobGroup[] = (() => {
@@ -430,20 +408,37 @@ export function DispatchSidebar({
                 </div>
               </div>
 
-              <div className="flex flex-col gap-1">
-                <label
-                  htmlFor="earliest-departure"
-                  className="text-xs font-medium"
-                >
-                  Giờ xuất phát sớm nhất
-                </label>
-                <Input
-                  id="earliest-departure"
-                  type="time"
-                  value={earliestDeparture}
-                  onChange={(e) => onEarliestDepartureChange(e.target.value)}
-                  disabled={busy}
-                />
+              <div className="grid grid-cols-2 gap-2.5">
+                <div className="flex flex-col gap-1">
+                  <label
+                    htmlFor="earliest-departure"
+                    className="text-xs font-medium"
+                  >
+                    Giờ xuất phát sớm nhất
+                  </label>
+                  <Input
+                    id="earliest-departure"
+                    type="time"
+                    value={earliestDeparture}
+                    onChange={(e) => onEarliestDepartureChange(e.target.value)}
+                    disabled={busy}
+                  />
+                </div>
+                <div className="flex flex-col gap-1">
+                  <label
+                    htmlFor="latest-departure"
+                    className="text-xs font-medium"
+                  >
+                    Giờ xuất phát muộn nhất
+                  </label>
+                  <Input
+                    id="latest-departure"
+                    type="time"
+                    value={latestDeparture}
+                    onChange={(e) => onLatestDepartureChange(e.target.value)}
+                    disabled={busy}
+                  />
+                </div>
               </div>
 
               <p className="text-[11px] text-muted-foreground">{seedPlanText}</p>
@@ -468,7 +463,7 @@ export function DispatchSidebar({
           </Card>
 
           {/* Add Driver Card */}
-          <Card size="sm">
+          {/* <Card size="sm">
             <CardHeader>
               <div className="flex items-center justify-between gap-2">
                 <div>
@@ -565,7 +560,7 @@ export function DispatchSidebar({
                 </Button>
               </form>
             </CardContent>
-          </Card>
+          </Card> */}
         </>
       ) : (
         <Card size="sm">

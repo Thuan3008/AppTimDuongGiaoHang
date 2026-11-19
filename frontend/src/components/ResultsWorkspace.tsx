@@ -5,6 +5,7 @@ import {
   FileSpreadsheetIcon,
   Loader2Icon,
   Maximize2Icon,
+  PrinterIcon,
   SendIcon,
 } from "lucide-react"
 
@@ -19,6 +20,10 @@ import {
 } from "@/components/ui/card"
 import { RouteGanttChart } from "@/components/RouteGanttChart"
 import { VehicleCapacityBalance } from "@/components/VehicleCapacityBalance"
+import {
+  DispatchManifestModal,
+  type ManifestTarget,
+} from "@/components/DispatchManifestModal"
 import {
   ROUTE_COLORS,
   algorithmLabel,
@@ -86,6 +91,9 @@ export function ResultsWorkspace({
   const [assigningIndex, setAssigningIndex] = useState<number | null>(null)
   const [completingStop, setCompletingStop] = useState<number | null>(null)
   const [failedStop, setFailedStop] = useState<number | null>(null)
+  const [manifestTarget, setManifestTarget] = useState<ManifestTarget | null>(
+    null
+  )
 
   const effectiveCapacity = useMemo(() => {
     return (
@@ -320,13 +328,16 @@ export function ResultsWorkspace({
                   <th className="px-3 py-2 font-medium whitespace-nowrap">
                     Giao tuyến
                   </th>
+                  <th className="px-3 py-2 font-medium whitespace-nowrap text-right">
+                    In ấn
+                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
                 {routes.length === 0 ? (
                   <tr>
                     <td
-                      colSpan={9}
+                      colSpan={10}
                       className="px-3 py-6 text-center text-muted-foreground"
                     >
                       Chưa có kết quả.
@@ -462,6 +473,39 @@ export function ResultsWorkspace({
                             </span>
                           )}
                         </td>
+                        <td
+                          className="px-3 py-2 text-right whitespace-nowrap"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="xs"
+                            title={`In lệnh giao hàng A4 cho Xe ${r.vehicle}`}
+                            onClick={() =>
+                              setManifestTarget({
+                                jobId:
+                                  currentJobId ||
+                                  payload?.config?.trip_name ||
+                                  "tdvrp-job",
+                                routeIndex: i,
+                                vehicle: r.vehicle,
+                                algorithm: selectedAlgorithm,
+                                tripName:
+                                  payload?.config?.trip_name ||
+                                  `Chuyến ${payload?.config?.dataset || ""}`,
+                                dataset: payload?.config?.dataset,
+                                trip: assigned,
+                                routeResult: r,
+                                points: points,
+                                capacity: effectiveCapacity,
+                              })
+                            }
+                          >
+                            <PrinterIcon data-icon="inline-start" />
+                            In lệnh
+                          </Button>
+                        </td>
                       </tr>
                     )
                   })
@@ -514,10 +558,41 @@ export function ResultsWorkspace({
                 )}
               </div>
               {currentTrip && (
-                <Badge variant="secondary">
-                  {deliveryStatuses.filter((s) => s.status === "completed").length}
-                  /{deliveryStatuses.length} điểm
-                </Badge>
+                <div className="flex items-center gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="xs"
+                    onClick={() => {
+                      const rIdx = currentTrip.route_index
+                      const r = routes[rIdx]
+                      setManifestTarget({
+                        jobId: currentJobId || currentTrip.job_id,
+                        routeIndex: rIdx,
+                        vehicle: r?.vehicle || rIdx + 1,
+                        algorithm: selectedAlgorithm || currentTrip.algorithm,
+                        tripName:
+                          payload?.config?.trip_name ||
+                          `Chuyến ${payload?.config?.dataset || ""}`,
+                        dataset: payload?.config?.dataset,
+                        trip: currentTrip,
+                        routeResult: r,
+                        points: points,
+                        capacity: effectiveCapacity,
+                      })
+                    }}
+                  >
+                    <PrinterIcon data-icon="inline-start" />
+                    In lệnh giao của tôi
+                  </Button>
+                  <Badge variant="secondary">
+                    {
+                      deliveryStatuses.filter((s) => s.status === "completed")
+                        .length
+                    }
+                    /{deliveryStatuses.length} điểm
+                  </Badge>
+                </div>
               )}
             </div>
           </CardHeader>
@@ -638,23 +713,52 @@ export function ResultsWorkspace({
                   key={`${route.vehicle}-${routeIndex}`}
                   className="flex flex-col gap-2"
                 >
-                  <button
-                    type="button"
-                    onClick={() => onFocusRoute(routeIndex)}
-                    className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-muted/40 px-3 py-2 text-left text-xs transition-colors hover:bg-muted"
-                  >
-                    <span
-                      className="inline-block size-2.5 shrink-0 rounded-full"
-                      style={{ backgroundColor: color }}
-                    />
-                    <strong className="font-semibold text-foreground">
-                      Xe {route.vehicle}
-                    </strong>
-                    <span className="text-muted-foreground">
-                      {stops.length} điểm · tải {fmt(route.load)} ·{" "}
-                      {clock(route.departure_time)}–{clock(route.end_time)}
-                    </span>
-                  </button>
+                  <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-muted/40 px-3 py-1.5 transition-colors hover:bg-muted/70">
+                    <button
+                      type="button"
+                      onClick={() => onFocusRoute(routeIndex)}
+                      className="flex flex-wrap items-center gap-2 text-left text-xs hover:underline"
+                    >
+                      <span
+                        className="inline-block size-2.5 shrink-0 rounded-full"
+                        style={{ backgroundColor: color }}
+                      />
+                      <strong className="font-semibold text-foreground">
+                        Xe {route.vehicle}
+                      </strong>
+                      <span className="text-muted-foreground">
+                        {stops.length} điểm · tải {fmt(route.load)} ·{" "}
+                        {clock(route.departure_time)}–{clock(route.end_time)}
+                      </span>
+                    </button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="xs"
+                      onClick={() =>
+                        setManifestTarget({
+                          jobId:
+                            currentJobId ||
+                            payload?.config?.trip_name ||
+                            "tdvrp-job",
+                          routeIndex,
+                          vehicle: route.vehicle,
+                          algorithm: selectedAlgorithm,
+                          tripName:
+                            payload?.config?.trip_name ||
+                            `Chuyến ${payload?.config?.dataset || ""}`,
+                          dataset: payload?.config?.dataset,
+                          trip: getAssignedTrip(routeIndex),
+                          routeResult: route,
+                          points: points,
+                          capacity: effectiveCapacity,
+                        })
+                      }
+                    >
+                      <PrinterIcon data-icon="inline-start" />
+                      In lệnh giao
+                    </Button>
+                  </div>
 
                   <div className="overflow-x-auto rounded-lg border border-border">
                     <table className="w-full border-collapse text-left text-xs">
@@ -820,6 +924,13 @@ export function ResultsWorkspace({
 
 
       )}
+
+      {/* A4 Dispatch Manifest Modal */}
+      <DispatchManifestModal
+        open={Boolean(manifestTarget)}
+        onClose={() => setManifestTarget(null)}
+        target={manifestTarget}
+      />
     </div>
   )
 }

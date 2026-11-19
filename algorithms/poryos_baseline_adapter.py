@@ -79,6 +79,7 @@ def run_baseline(
     seed: int,
     initial_population: Iterable[Iterable[int]] | None = None,
     start_time: float = 0.0,
+    latest_time: float | None = None,
 ) -> BaselineAdapterResult:
     """Chạy một baseline với cùng objective và trả route trace chuẩn hóa."""
     if algorithm not in BASELINE_ALGORITHMS:
@@ -117,6 +118,8 @@ def run_baseline(
     # RAPO-2709. Bản Poryos gốc vẫn lưu num_vehicles=4, nên dùng bản view
     # có đúng số route của nghiệm khi materialize trace; không sửa dữ liệu.
     trace_instance = replace(instance, num_vehicles=len(routes))
+    horizon_end = float(instance.horizon[1])
+    window_end = min(horizon_end, latest_time) if latest_time is not None else horizon_end
     evaluator = HCMCTDVRPEvaluator(
         trace_instance,
         graph,
@@ -124,6 +127,7 @@ def run_baseline(
         start_time=start_time,
         departure_time_mode="optimize",
         departure_time_step=instance.sample_step,
+        departure_time_window=(start_time, max(start_time, window_end)),
     )
     evaluation = evaluator.evaluate(solution)
     solution.fitness = evaluation.fitness

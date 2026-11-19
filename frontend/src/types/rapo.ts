@@ -145,6 +145,7 @@ export interface OptimizationConfig {
   seed: number
   num_seeds: number
   earliest_departure: number
+  latest_departure?: number
   custom_points?: CustomPointsPayload
 }
 
@@ -239,6 +240,7 @@ export interface PlanMetadata {
   dataset?: string
   algorithm?: string
   departure_time?: number
+  latest_departure?: number
   total_routes?: number
   routes_summary?: PlanRouteSummary[]
 }
