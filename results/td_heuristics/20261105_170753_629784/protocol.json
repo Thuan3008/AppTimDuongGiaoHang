@@ -1,0 +1,19 @@
+{
+  "instance": "E:\\1KLCN\\tdvrp-rapo\\data\\TDVRP\\hong_kong\\n=25\\poryos-hong_kong-n25-hyb\\bpr-heavy\\poryos-hong_kong-n25-hyb-bpr-heavy.vrp.json",
+  "instance_name": "poryos-hong_kong-n25-hyb-bpr-heavy",
+  "python": "3.11.7 (tags/v3.11.7:fa7a6f2, Dec  4 2023, 19:24:49) [MSC v.1937 64 bit (AMD64)]",
+  "platform": "Windows-10-10.0.26300-SP0",
+  "time_limit_seconds": 30.0,
+  "execution": "sequential, one deterministic run per method",
+  "algorithms": [
+    "TD-Insertion",
+    "TD-Local-Search"
+  ],
+  "source_sha256": {
+    "E:\\1KLCN\\tdvrp-rapo\\algorithms\\td_constructive.py": "a5f0542b361475cabeab1dcdcf2a446359a54d0e4227460da39bbbfbe09da821",
+    "E:\\1KLCN\\tdvrp-rapo\\core\\tdvrp_common.py": "ce19bafe076924f32b1963e9af39c1daae01dbce5c34cbff8e942276315a8853",
+    "E:\\1KLCN\\tdvrp-rapo\\experiments\\run_td_heuristics.py": "01d485e7e9a57ac6aa77335bf8c724afcc34b2286d64e40614a75bec68ce9334",
+    "E:\\1KLCN\\tdvrp-rapo\\data\\TDVRP\\hong_kong\\n=25\\poryos-hong_kong-n25-hyb\\bpr-heavy\\poryos-hong_kong-n25-hyb-bpr-heavy.vrp.json": "0b0a77afb3aa0889dc6a8491816bd7c4f1c75bb4e6b6bbf53e120b946dca8333",
+    "E:\\1KLCN\\tdvrp-rapo\\data\\TDVRP\\hong_kong\\n=25\\poryos-hong_kong-n25-hyb\\bpr-heavy\\poryos-hong_kong-n25-hyb-bpr-heavy.bks.Duration.json": "fe2236ef356ab9c9691d7c804642c24b7f06a8e7c5ef5ab3948545d64523941a"
+  }
+}

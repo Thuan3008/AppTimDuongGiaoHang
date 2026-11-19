@@ -1,0 +1,15 @@
+chi_tieu,n10_khach_hang,n100_khach_hang
+so_luot_chay,10,10
+seed_su_dung,0-9,0-9
+kich_thuoc_quan_the,10,10
+ngan_sach_nfe,290,290
+nfe_thuc_dung_moi_luot,290,290
+luot_kha_thi,10/10,10/10
+duration_tot_nhat_giay,3968.07,23918.62
+seed_duration_tot_nhat,8,6
+duration_trung_binh_giay,4133.54,24595.04
+do_lech_chuan_duration_giay,97.96,483.39
+thoi_gian_thuc_thi_trung_binh_giay,16.38,35.03
+so_tuyen_moi_luot,1,6
+chinh_sach_gio_xuat_phat,Co dinh 08:00,exact_ndcpwlf (toi uu tu 08:00)
+tham_chieu_bao_cao,"Muc 5.4.3, Bang 5.8","Muc 5.4.3, Bang 5.8"

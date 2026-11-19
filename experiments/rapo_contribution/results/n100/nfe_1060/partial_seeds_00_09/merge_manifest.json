@@ -1,0 +1,61 @@
+{
+  "dataset": "n100",
+  "status": "partial_10_of_30_seeds",
+  "merged_at": "2026-10-26T14:26:22",
+  "source_checkpoints": [
+    "E:\\1KLCN\\tdvrp-rapo\\experiments\\rapo_contribution\\results\\n100\\nfe_1060\\shards\\seeds_00_09\\checkpoint.jsonl",
+    "E:\\1KLCN\\tdvrp-rapo\\experiments\\rapo_contribution\\results\\n100\\nfe_1060\\shards\\seeds_05_09\\checkpoint.jsonl"
+  ],
+  "selected_seeds": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9
+  ],
+  "selected_run_count": 50,
+  "duplicate_runs_excluded": [
+    {
+      "algorithm": "ARO-Original",
+      "seed": 5,
+      "kept_runtime_seconds": 4307.526022400001,
+      "excluded_runtime_seconds": 4243.8398469,
+      "excluded_from": "E:\\1KLCN\\tdvrp-rapo\\experiments\\rapo_contribution\\results\\n100\\nfe_1060\\shards\\seeds_05_09\\checkpoint.jsonl"
+    },
+    {
+      "algorithm": "POA-Original",
+      "seed": 5,
+      "kept_runtime_seconds": 10538.128281699996,
+      "excluded_runtime_seconds": 10559.281948699998,
+      "excluded_from": "E:\\1KLCN\\tdvrp-rapo\\experiments\\rapo_contribution\\results\\n100\\nfe_1060\\shards\\seeds_05_09\\checkpoint.jsonl"
+    },
+    {
+      "algorithm": "RAPO-2709",
+      "seed": 5,
+      "kept_runtime_seconds": 2389.5640428000042,
+      "excluded_runtime_seconds": 2367.3664052999993,
+      "excluded_from": "E:\\1KLCN\\tdvrp-rapo\\experiments\\rapo_contribution\\results\\n100\\nfe_1060\\shards\\seeds_05_09\\checkpoint.jsonl"
+    },
+    {
+      "algorithm": "GA",
+      "seed": 5,
+      "kept_runtime_seconds": 848.5807309000083,
+      "excluded_runtime_seconds": 850.0653859000013,
+      "excluded_from": "E:\\1KLCN\\tdvrp-rapo\\experiments\\rapo_contribution\\results\\n100\\nfe_1060\\shards\\seeds_05_09\\checkpoint.jsonl"
+    },
+    {
+      "algorithm": "GA-LS",
+      "seed": 5,
+      "kept_runtime_seconds": 1471.6918943000055,
+      "excluded_runtime_seconds": 1636.446800200003,
+      "excluded_from": "E:\\1KLCN\\tdvrp-rapo\\experiments\\rapo_contribution\\results\\n100\\nfe_1060\\shards\\seeds_05_09\\checkpoint.jsonl"
+    }
+  ],
+  "selection_rule": "first checkpoint wins when duplicate solutions match except runtime",
+  "note": "This is a 10-seed report; do not combine it with the 30-seed n25/n50 summaries as if sample sizes matched."
+}

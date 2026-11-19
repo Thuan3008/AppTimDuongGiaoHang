@@ -1,0 +1,291 @@
+"instance_name": "poryos-hong_kong-n10-hyb-bpr-heavy"
+Tên bộ dữ liệu:
+- hong_kong: thành phố Hong Kong.
+- n10: 10 khách hàng.
+- hyb: phương pháp hybrid dùng để chọn vị trí khách hàng.
+- bpr: sử dụng mô hình giao thông BPR.
+- heavy: mức giao thông nặng.
+
+===============================
+
+"instance_origin": "OsmCvrpGen"
+Bộ dữ liệu gốc được tạo bằng công cụ OsmCvrpGen.
+
+===============================
+
+"benchmark_name": "Poryos2026"
+Tên bộ benchmark là Poryos2026.
+
+===============================
+
+2. Khách hàng và xe
+"num_customers": 10
+Có 10 khách hàng, được đánh số từ 1 đến 10.
+Điểm 0 là kho.
+
+================================
+
+"num_vehicles": null
+Bộ dữ liệu không quy định cố định phải dùng bao nhiêu xe.
+Thuật toán có thể tạo số route cần thiết để phục vụ toàn bộ khách hàng, miễn thỏa mãn tải trọng. Nếu project muốn giới hạn tối đa m xe thì phải truyền giới hạn đó từ cấu hình thuật toán.
+
+==================================
+
+"vehicle_capacity": 101
+Mỗi xe chở tối đa 101 đơn vị hàng.
+Tổng nhu cầu: 61+9+7+60+5+77+4+1+8+2=234
+234/101 = 3 xe
+Do đó nghiệm BKS trước đó dùng 3 xe là hợp lý.
+
+==============================
+
+3. Tọa độ
+"coordinates": [
+    [1438.94, -1211.86],
+    ...
+]
+Đây không phải kinh độ, vĩ độ trực tiếp. Nó là tọa độ phẳng cục bộ, thường tính bằng mét, lấy mốc từ:
+"reference_lla": {
+    "lat": 22.35252895,
+    "lon": 114.15986375,
+    "alt": 0.0
+}
+Ví dụ:
+Điểm 0: [1438, -1211]
+Có nghĩa điểm đó lệch khỏi mốc tham chiếu theo hai trục tọa độ cục bộ. Vì vậy các giá trị âm hoặc lớn hàng nghìn là bình thường.
+reference_lla dùng để chuyển tọa độ cục bộ về vị trí địa lý Hong Kong khi cần hiển thị bản đồ.
+
+===============================
+
+4. Nhu cầu giao hàng
+"demands": [0, 61, 9, 7, 60, 5, 77, 4, 1, 8, 2]
+Phần tử đầu tiên là kho nên nhu cầu bằng 0.
+Điểm	Nhu cầu
+Kho 0	0
+Khách 1	61
+Khách 2	9
+Khách 3	7
+Khách 4	60
+Khách 5	5
+Khách 6	77
+Khách 7	4
+Khách 8	1
+Khách 9	8
+Khách 10	2
+
+
+Tổng nhu cầu trên một route không được vượt quá 101.
+
+==================================
+
+5. Thời gian phục vụ
+"service_times": [
+    0, 950, 497, 192, 233, 1272,
+    957, 103, 13, 405, 1071
+]
+Đơn vị là giây.
+Ví dụ:
+- Khách 1: 950 giây ≈ 15 phút 50 giây.
+- Khách 5: 1272 giây ≈ 21 phút 12 giây.
+- Khách 8: 13 giây.
+- Khách 10: 1071 giây ≈ 17 phút 51 giây.
+Service time không nằm trong ATF. Nó được cộng sau khi xe đến khách:
+07:00 xuất phát
+→ đi 30 phút
+→ 07:30 đến khách
+→ phục vụ 950 giây
+→ 07:45:50 mới đi chặng tiếp theo
+Sau đó ATF của chặng tiếp theo phải được tra tại 07:45:50, không phải 07:30.
+
+===================================
+
+6. Kho và khoảng thời gian mô phỏng
+"depot": 0
+Điểm số 0 là kho.
+"horizon": [0.0, 86400.0]
+Thời gian mô phỏng kéo dài một ngày:
+86400s = 24h
+Tức là từ 00:00 đến 24:00.
+
+=====================================
+
+"graph": {
+    "path": "...road.json.gz",
+    "sha256": "..."
+}
+File road.json.gz chứa đồ thị đường OSM:
+- Node đường.
+- Edge đường.
+- Chiều đi.
+- Đường một chiều/hai chiều.
+- Chiều dài.
+- Vận tốc free-flow.
+- Loại đường.
+sha256 dùng để kiểm tra file graph có đúng phiên bản và không bị thay đổi.
+
+=================================================
+
+8. Traffic
+"traffic": {
+    "path": "...traffic-bpr-heavy.json.gz",
+    "sha256": "..."
+}
+File này chứa vận tốc hoặc trạng thái giao thông của từng cạnh theo thời gian.
+Nó kết hợp với road graph:
+Chiều dài cạnh
++ vận tốc theo thời điểm
+→ thời gian đi qua cạnh
+
+===================================
+
+9. ATF nằm ở đâu?
+"atf_sha256": "92e6a3..."
+Đây không phải nội dung ATF. Nó là mã kiểm tra của bộ ATF được sinh ra.
+ATF được tạo theo luồng:
+road.json.gz
++ traffic-bpr-heavy.json.gz
++ các điểm kho/khách
+→ tìm đường được ghim giữa từng cặp điểm
+→ tính thời gian đi theo từng thời điểm
+→ tạo ATF
+Với 10 khách và 1 kho, có 11 điểm. Số cặp có hướng tối đa, không tính đi từ một điểm về chính nó:
+11 x 10 = 110 cặp
+Ví dụ:
+ATF(0,1,08:00) → thời gian từ kho đến khách 1 lúc 08:00
+ATF(1,5,08:20) → thời gian từ khách 1 đến khách 5 lúc 08:20
+ATF(5,0,09:00) → thời gian từ khách 5 về kho lúc 09:00
+
+===========================
+
+10. sample_step
+"sample_step": 60.0
+ATF được lấy mẫu mỗi 60 giây, tức mỗi phút.
+Ví dụ:
+08:00 → 620 giây
+08:01 → 623 giây
+08:02 → 627 giây
+...
+Một ngày có khoảng:
+86400 / 60 = 1440
+mốc thời gian một phút để mô tả sự thay đổi thời gian di chuyển.
+
+==============================
+
+11. simplify_tolerance
+"simplify_tolerance": 1.0
+Dung sai dùng khi đơn giản hóa hàm ATF.
+Nếu các điểm liên tiếp gần như nằm trên cùng một đường thẳng thì có thể gộp lại để giảm kích thước mà không làm thay đổi đáng kể kết quả.
+
+===============================
+
+12. Mô hình BPR
+"model": "bpr"
+BPR mô phỏng thời gian di chuyển tăng lên khi lưu lượng xe gần hoặc vượt khả năng chứa của đường:
+\[
+t=t_0\left[1+\alpha\left(\frac{v}{c}\right)^\beta\right]
+\]
+Trong đó:
+- \(t_0\): thời gian free-flow.
+- \(v\): lưu lượng xe.
+- \(c\): khả năng chứa của đường.
+- \(\alpha=0.15\).
+- \(\beta=4\).
+Trong file:
+"bpr_alpha": 0.15,
+"bpr_beta": 4
+Khi tỷ lệ \(v/c\) tăng, thời gian di chuyển tăng rất nhanh.
+
+
+===============================
+
+13. Sức chứa của từng loại đường
+"capacity_veh_h": {
+    "1": 1900,
+    "2": 1600,
+    "3": 1400,
+    "4": 1100,
+    "5": 900,
+    "6": 600,
+    "7": 400,
+    "8": 300
+}
+Đây là số xe mà từng loại đường có thể phục vụ trong một giờ.
+Ví dụ:
+- Nhóm đường 1: 1900 xe/giờ.
+- Nhóm đường 5: 900 xe/giờ.
+- Nhóm đường 8: 300 xe/giờ.
+Đường nhỏ có capacity thấp nên dễ bị ùn tắc hơn.
+
+==============================
+
+
+14. Giới hạn tốc độ và hệ số kẹt xe
+"min_speed_factor": 0.12
+Tốc độ thấp nhất được giới hạn bằng 12% tốc độ free-flow.
+Ví dụ tốc độ free-flow là 50 km/h:
+50 x 0.12 = 6km/h
+"multiplier_cap": 6.0
+Thời gian di chuyển tối đa không vượt quá sáu lần thời gian free-flow.
+
+==============================
+
+15. Dữ liệu chuyến xe mô phỏng
+"num_trips": 1388972
+Có khoảng 1,39 triệu chuyến đi mô phỏng được dùng để tạo lưu lượng giao thông.
+Đây không phải số xe giao hàng trong bài toán. Nó là lượng chuyến giao thông nền dùng để làm đường bị đông hoặc kẹt.
+"trips_per_vertex": 10.0
+Thông số mật độ tạo chuyến mô phỏng theo các đỉnh của graph.
+
+==================================
+
+16. Giờ cao điểm
+"departures": {
+    "lunch_return": [12.25, 0.5],
+    "lunch_probability": 0.25,
+    "lunch_back": [13.5, 0.5],
+    "morning": [8.0, 0.75],
+    "evening": [17.5, 1.0]
+}
+Các cặp số thể hiện thời điểm trung tâm và độ phân tán của chuyến đi:
+- morning [8.0, 0.75]: cao điểm quanh 08:00.
+- evening [17.5, 1.0]: cao điểm quanh 17:30.
+- lunch_return [12.25, 0.5]: lưu lượng quanh 12:15.
+- lunch_back [13.5, 0.5]: lưu lượng quay lại quanh 13:30.
+- lunch_probability = 0.25: khoảng 25% chuyến có hành vi đi vào giờ trưa.
+
+
+
+
+=================================
+
+
+Tóm tắt luồng sử dụng file này
+File VRP
+├── điểm khách hàng
+├── demand
+├── service time
+├── capacity
+└── horizon
+
+Road graph
+├── đường đi
+├── chiều dài
+└── free-flow speed
+
+Traffic BPR
+├── lưu lượng mô phỏng
+├── capacity đường
+└── giờ cao điểm
+
+Road graph + traffic
+→ sinh ATF mỗi 60 giây
+
+ATF + service time + thứ tự khách
+→ tính Duration của route
+
+RAPO
+→ thay đổi thứ tự khách và cách chia route
+→ tìm nghiệm có tổng Duration nhỏ nhất
+
+BKS
+→ đáp án chuẩn để đánh giá RAPO

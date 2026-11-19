@@ -1,0 +1,158 @@
+{
+  "algorithm": "TD-QL",
+  "instance": "data\\TDVRP\\hong_kong\\n=50\\poryos-hong_kong-n50-hyb\\bpr-heavy\\poryos-hong_kong-n50-hyb-bpr-heavy.vrp.json",
+  "seed": 0,
+  "mode": "q_learning",
+  "max_steps": 20,
+  "routes": [
+    [
+      29,
+      19,
+      23,
+      1,
+      46,
+      9,
+      20,
+      13,
+      21,
+      31,
+      24,
+      44,
+      37,
+      42,
+      35,
+      17
+    ],
+    [
+      2,
+      30,
+      27,
+      49
+    ],
+    [
+      43,
+      41,
+      25,
+      12,
+      7,
+      6,
+      8,
+      39,
+      40,
+      50,
+      5,
+      10,
+      15,
+      47
+    ],
+    [
+      22,
+      38,
+      34,
+      45,
+      18,
+      16,
+      28,
+      48,
+      3,
+      33,
+      14,
+      26,
+      4,
+      32,
+      36,
+      11
+    ]
+  ],
+  "duration": 59450.836538199146,
+  "runtime_seconds": 81.33179569999993,
+  "departure_times": [
+    0.0,
+    81226.58905493961,
+    0.0,
+    0.0
+  ],
+  "return_times": [
+    21288.257445282357,
+    86922.32176539887,
+    13264.341538078146,
+    19202.50484437939
+  ],
+  "route_durations": [
+    21288.257445282357,
+    5695.732710459255,
+    13264.341538078146,
+    19202.50484437939
+  ],
+  "route_loads": [
+    133,
+    142,
+    146,
+    136
+  ],
+  "num_routes": 4,
+  "stats": {
+    "steps": 20,
+    "proposed_moves": {
+      "relocate": 30,
+      "swap": 120,
+      "two_opt_star": 360,
+      "relocate_new_route": 90
+    },
+    "capacity_checks": {
+      "relocate": 38,
+      "swap": 239,
+      "two_opt_star": 720,
+      "relocate_new_route": 180
+    },
+    "capacity_rejects": {
+      "relocate": 0,
+      "swap": 0,
+      "two_opt_star": 0,
+      "relocate_new_route": 0
+    },
+    "exact_route_evals": {
+      "relocate": 34,
+      "swap": 235,
+      "two_opt_star": 631,
+      "relocate_new_route": 118
+    },
+    "accepted_moves": {
+      "relocate": 1,
+      "swap": 2,
+      "two_opt_star": 10,
+      "relocate_new_route": 0
+    },
+    "cache_hits": 159,
+    "total_route_evals": 1018,
+    "total_accepted": 13
+  },
+  "eval_feasible": true,
+  "eval_duration": 59450.836538199146,
+  "eval_gap_pct": 5.2389286940662565,
+  "eval_bks": 56491.297731683575,
+  "eval_missing": [],
+  "eval_duplicates": [],
+  "eval_capacity_ok": true,
+  "eval_num_routes": 4,
+  "eval_departure_times": [
+    0.0,
+    81226.58905493961,
+    0.0,
+    0.0
+  ],
+  "eval_return_times": [
+    21288.257445282357,
+    86922.32176539887,
+    13264.341538078146,
+    19202.50484437939
+  ],
+  "eval_route_durations": [
+    21288.257445282357,
+    5695.732710459255,
+    13264.341538078146,
+    19202.50484437939
+  ],
+  "bks": 56491.297731683575,
+  "gap_pct": 5.2389286940662565
+}

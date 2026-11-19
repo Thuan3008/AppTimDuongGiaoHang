@@ -1,0 +1,21 @@
+{
+  "created_utc": "2026-11-07T07:31:54.750363+00:00",
+  "config_file": "C:\\KLCN\\CODE\\THUCNGHIEM\\configs\\experiments\\rapo_sensitivity_quick.yaml",
+  "config_sha256": "1715e3ed3d7df03eb4cac1ef1667f1d2dd509f0aa4547e3ab011e59f602fbef3",
+  "variant": "rapo_2709",
+  "phase": "quick",
+  "workers": 2,
+  "total_tasks": 24,
+  "completed_in_this_run": 24,
+  "python_version": "3.11.9 (tags/v3.11.9:de54cf5, Apr  2 2024, 10:12:12) [MSC v.1938 64 bit (AMD64)]",
+  "platform": "Windows-10-10.0.28120-SP0",
+  "baseline_reference": {
+    "population_size": 10,
+    "max_evaluations": 100,
+    "destroy_fraction": 0.1,
+    "elite_budget_fraction": 0.2,
+    "aos_alpha": 0.2,
+    "aos_epsilon": 0.1,
+    "criticality_floor": 0.1
+  }
+}

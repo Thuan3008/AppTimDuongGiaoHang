@@ -1,0 +1,214 @@
+{
+  "algorithm": "TD-Local-Search",
+  "routes": [
+    [
+      1,
+      3,
+      20,
+      25,
+      8,
+      14,
+      10,
+      2
+    ],
+    [
+      4
+    ],
+    [
+      5
+    ],
+    [
+      7
+    ],
+    [
+      11
+    ],
+    [
+      13
+    ],
+    [
+      16
+    ],
+    [
+      18
+    ],
+    [
+      19
+    ],
+    [
+      21,
+      6,
+      15,
+      12,
+      9,
+      24,
+      22,
+      17,
+      23
+    ]
+  ],
+  "duration": 27316.22445352248,
+  "departure_times": [
+    0.0,
+    85353.92935872797,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    84934.52905037304,
+    0.0,
+    79070.29118603293
+  ],
+  "return_times": [
+    4062.59548333716,
+    86903.76612970952,
+    2370.754585212169,
+    1553.3057769072689,
+    2129.2607146323303,
+    1451.9965912730604,
+    1600.03305143623,
+    87122.86076488612,
+    2667.023376157852,
+    86813.3775751047
+  ],
+  "route_durations": [
+    4062.59548333716,
+    1549.8367709815502,
+    2370.754585212169,
+    1553.3057769072689,
+    2129.2607146323303,
+    1451.9965912730604,
+    1600.03305143623,
+    2188.331714513086,
+    2667.023376157852,
+    7743.086389071774
+  ],
+  "runtime_seconds": 3.002562200000284,
+  "feasible": true,
+  "termination": "time_limit_during_insertion",
+  "statistics": {
+    "route_evaluation_requests": 1433,
+    "route_evaluations": 934,
+    "cache_hits": 0,
+    "capacity_rejections": 499,
+    "domain_rejections": 0,
+    "candidate_moves": 1408,
+    "accepted_moves": 17
+  },
+  "history": [
+    {
+      "seconds": 0.013431600000330945,
+      "duration": 35357.97002356282,
+      "route_evaluations": 25,
+      "phase": "singleton_initialization"
+    },
+    {
+      "seconds": 0.04586470000049303,
+      "duration": 34995.03657297941,
+      "route_evaluations": 67,
+      "phase": "insertion"
+    },
+    {
+      "seconds": 0.11989739999989979,
+      "duration": 34561.6758810047,
+      "route_evaluations": 127,
+      "phase": "insertion"
+    },
+    {
+      "seconds": 0.2628375000003871,
+      "duration": 33871.89307708387,
+      "route_evaluations": 203,
+      "phase": "insertion"
+    },
+    {
+      "seconds": 0.48779190000004746,
+      "duration": 32998.52253642258,
+      "route_evaluations": 293,
+      "phase": "insertion"
+    },
+    {
+      "seconds": 0.6655210999997507,
+      "duration": 32259.07675466004,
+      "route_evaluations": 347,
+      "phase": "insertion"
+    },
+    {
+      "seconds": 0.7786016999998537,
+      "duration": 31641.73728863282,
+      "route_evaluations": 375,
+      "phase": "insertion"
+    },
+    {
+      "seconds": 0.8371957999997903,
+      "duration": 31226.318150874962,
+      "route_evaluations": 417,
+      "phase": "insertion"
+    },
+    {
+      "seconds": 0.8971996000000217,
+      "duration": 30829.11039134967,
+      "route_evaluations": 465,
+      "phase": "insertion"
+    },
+    {
+      "seconds": 1.0079525000001013,
+      "duration": 29964.33526950532,
+      "route_evaluations": 525,
+      "phase": "insertion"
+    },
+    {
+      "seconds": 1.0081927999999607,
+      "duration": 29699.77384780348,
+      "route_evaluations": 525,
+      "phase": "insertion"
+    },
+    {
+      "seconds": 1.1656303999998272,
+      "duration": 29457.65500962624,
+      "route_evaluations": 590,
+      "phase": "insertion"
+    },
+    {
+      "seconds": 1.3805890000003274,
+      "duration": 28979.80723993225,
+      "route_evaluations": 662,
+      "phase": "insertion"
+    },
+    {
+      "seconds": 1.6950243000001137,
+      "duration": 28369.528600257072,
+      "route_evaluations": 732,
+      "phase": "insertion"
+    },
+    {
+      "seconds": 2.083300500000405,
+      "duration": 27672.338883742992,
+      "route_evaluations": 804,
+      "phase": "insertion"
+    },
+    {
+      "seconds": 2.5229292000003625,
+      "duration": 27316.22445352248,
+      "route_evaluations": 876,
+      "phase": "insertion"
+    }
+  ],
+  "metadata": {
+    "deterministic": true,
+    "initialization": "parallel_cheapest_insertion",
+    "objective": "Duration",
+    "route_encoding": "customer IDs, implicit depot",
+    "departure": "exact route oracle",
+    "split": false,
+    "nfe_equivalence": false,
+    "config": {
+      "time_limit_seconds": 3.0,
+      "improvement_tolerance": 1e-09
+    },
+    "time_limit": "cooperative; includes startup and final validation, may overrun",
+    "implementation_scope": "TD adaptations; not full TREE/BonnTour implementations"
+  },
+  "bks_cost": 21427.142968877823,
+  "gap_to_bks_percent": 27.48421239919081
+}

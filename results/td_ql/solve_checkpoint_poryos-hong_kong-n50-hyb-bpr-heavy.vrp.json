@@ -1,0 +1,174 @@
+{
+  "instance_name": "poryos-hong_kong-n50-hyb-bpr-heavy",
+  "dimension": 50,
+  "mode": "q_learning",
+  "step": 20,
+  "max_steps": 20,
+  "routes": [
+    [
+      29,
+      19,
+      23,
+      1,
+      46,
+      9,
+      20,
+      13,
+      21,
+      31,
+      24,
+      44,
+      37,
+      42,
+      35,
+      17
+    ],
+    [
+      2,
+      30,
+      27,
+      49
+    ],
+    [
+      43,
+      41,
+      25,
+      12,
+      7,
+      6,
+      8,
+      39,
+      40,
+      50,
+      5,
+      10,
+      15,
+      47
+    ],
+    [
+      22,
+      38,
+      34,
+      45,
+      18,
+      16,
+      28,
+      48,
+      3,
+      33,
+      14,
+      26,
+      4,
+      32,
+      36,
+      11
+    ]
+  ],
+  "route_costs": {
+    "0": 21288.257445282357,
+    "1": 5695.732710459255,
+    "2": 13264.341538078146,
+    "3": 19202.50484437939
+  },
+  "best_routes": [
+    [
+      29,
+      19,
+      23,
+      1,
+      46,
+      9,
+      20,
+      13,
+      21,
+      31,
+      24,
+      44,
+      37,
+      42,
+      35,
+      17
+    ],
+    [
+      2,
+      30,
+      27,
+      49
+    ],
+    [
+      43,
+      41,
+      25,
+      12,
+      7,
+      6,
+      8,
+      39,
+      40,
+      50,
+      5,
+      10,
+      15,
+      47
+    ],
+    [
+      22,
+      38,
+      34,
+      45,
+      18,
+      16,
+      28,
+      48,
+      3,
+      33,
+      14,
+      26,
+      4,
+      32,
+      36,
+      11
+    ]
+  ],
+  "best_cost": 59450.836538199146,
+  "stagnation": 0,
+  "stats": {
+    "steps": 20,
+    "proposed_moves": {
+      "relocate": 30,
+      "swap": 120,
+      "two_opt_star": 360,
+      "relocate_new_route": 90
+    },
+    "capacity_checks": {
+      "relocate": 38,
+      "swap": 239,
+      "two_opt_star": 720,
+      "relocate_new_route": 180
+    },
+    "capacity_rejects": {
+      "relocate": 0,
+      "swap": 0,
+      "two_opt_star": 0,
+      "relocate_new_route": 0
+    },
+    "exact_route_evals": {
+      "relocate": 34,
+      "swap": 235,
+      "two_opt_star": 631,
+      "relocate_new_route": 118
+    },
+    "accepted_moves": {
+      "relocate": 1,
+      "swap": 2,
+      "two_opt_star": 10,
+      "relocate_new_route": 0
+    },
+    "cache_hits": 159,
+    "total_route_evals": 1018,
+    "total_accepted": 13
+  },
+  "elapsed_seconds": 81.33179569999993,
+  "completed": true,
+  "timestamp": "2026-11-06 22:30:52"
+}

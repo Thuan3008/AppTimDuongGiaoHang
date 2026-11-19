@@ -1,0 +1,153 @@
+{
+  "routes": [
+    [
+      1,
+      2,
+      4,
+      7,
+      8
+    ],
+    [
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15
+    ],
+    [
+      17,
+      18,
+      19,
+      21
+    ],
+    [
+      22,
+      23,
+      24,
+      25,
+      16,
+      3,
+      20,
+      6,
+      5
+    ]
+  ],
+  "duration": 24884.29016578365,
+  "nfe": 70929,
+  "history": [
+    {
+      "seconds": 0.4455617000021448,
+      "duration": 27374.975519174703,
+      "nfe": 1,
+      "completed_within_deadline": true
+    },
+    {
+      "seconds": 5.859104400002252,
+      "duration": 27222.748139322444,
+      "nfe": 8,
+      "completed_within_deadline": true
+    },
+    {
+      "seconds": 6.238856100000703,
+      "duration": 26699.052972950587,
+      "nfe": 9,
+      "completed_within_deadline": true
+    },
+    {
+      "seconds": 10.809762500000943,
+      "duration": 26491.101800758224,
+      "nfe": 15,
+      "completed_within_deadline": true
+    },
+    {
+      "seconds": 14.147746800001187,
+      "duration": 26470.12213012937,
+      "nfe": 20,
+      "completed_within_deadline": true
+    },
+    {
+      "seconds": 19.548613900002238,
+      "duration": 26455.19141740832,
+      "nfe": 30,
+      "completed_within_deadline": true
+    },
+    {
+      "seconds": 20.292528000001766,
+      "duration": 26368.4604753968,
+      "nfe": 31,
+      "completed_within_deadline": true
+    },
+    {
+      "seconds": 29.713406900002155,
+      "duration": 25995.059994118063,
+      "nfe": 47,
+      "completed_within_deadline": true
+    },
+    {
+      "seconds": 46.96973520000029,
+      "duration": 25881.97481442457,
+      "nfe": 88,
+      "completed_within_deadline": true
+    },
+    {
+      "seconds": 51.23412699999972,
+      "duration": 25572.794317954715,
+      "nfe": 95,
+      "completed_within_deadline": true
+    },
+    {
+      "seconds": 63.27669270000115,
+      "duration": 25223.547623449143,
+      "nfe": 127,
+      "completed_within_deadline": true
+    },
+    {
+      "seconds": 81.99853430000076,
+      "duration": 24976.66943289085,
+      "nfe": 203,
+      "completed_within_deadline": true
+    },
+    {
+      "seconds": 93.4568317000012,
+      "duration": 24956.526503932702,
+      "nfe": 336,
+      "completed_within_deadline": true
+    },
+    {
+      "seconds": 96.10864520000177,
+      "duration": 24928.661211487404,
+      "nfe": 513,
+      "completed_within_deadline": true
+    },
+    {
+      "seconds": 96.70172960000127,
+      "duration": 24884.29016578365,
+      "nfe": 572,
+      "completed_within_deadline": true
+    }
+  ],
+  "termination": "time_limit",
+  "search_runtime_seconds": 120.0001884000012,
+  "algorithm": "ARO-Original",
+  "seed": 11,
+  "feasible": true,
+  "status": "completed",
+  "gap_to_bks_percent": 16.134429130039464,
+  "departure_times": [
+    83666.93255457384,
+    0.0,
+    0.0,
+    0.0
+  ],
+  "return_times": [
+    86800.89005338363,
+    7505.72083901868,
+    6196.1476791097575,
+    8048.464148845424
+  ],
+  "validation_seconds": 0.0018147000009776093,
+  "best_duration_within_deadline": 24884.29016578365,
+  "time_limit_seconds": 120
+}

@@ -1,0 +1,6 @@
+﻿dataset,primary,baseline,paired_seeds,primary_wins,ties,primary_losses,mean_baseline_minus_primary_seconds,median_baseline_minus_primary_seconds,two_sided_sign_test_p,statistical_note
+n50,RAPO-2709,ARO-Original,10,10,0,0,9410.467055682475,9535.014450421477,0.001953125,
+n50,RAPO-2709,GA,10,10,0,0,7690.38427371661,7993.079044927206,0.001953125,
+n50,RAPO-2709,GA-LS,10,10,0,0,6961.531540553782,7102.835275680194,0.001953125,
+n50,RAPO-2709,POA-Original,10,10,0,0,11181.132342580091,11317.924812699326,0.001953125,
+n50,RAPO-2709,Greedy,10,10,0,0,9030.625694738197,9152.342955191107,,"Greedy is one deterministic reference, so no paired significance test is claimed"

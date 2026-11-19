@@ -1,0 +1,4 @@
+﻿algorithm,duration,gap_to_bks_percent,runtime_seconds,num_routes,feasible,termination,route_evaluation_requests,route_evaluations,cache_hits,capacity_rejections,domain_rejections,candidate_moves,accepted_moves
+TD-Insertion,26906.2340825422,25.57079645019669,3.004308100000344,9,True,time_limit_during_insertion,1487,978,0,509,0,1462,18
+TD-Savings,22016.484457769395,2.75044363006105,1.520846899999924,4,True,no_positive_savings,1171,1065,0,106,0,1146,21
+TD-Local-Search,27316.22445352248,27.48421239919081,3.002562200000284,10,True,time_limit_during_insertion,1433,934,0,499,0,1408,17

@@ -1,0 +1,105 @@
+{
+  "routes": [
+    [
+      5,
+      11,
+      8,
+      14,
+      23,
+      12
+    ],
+    [
+      18
+    ],
+    [
+      20,
+      2,
+      4,
+      17,
+      19
+    ],
+    [
+      24,
+      22,
+      15,
+      1,
+      21,
+      9,
+      6,
+      10,
+      16,
+      13,
+      3,
+      25,
+      7
+    ]
+  ],
+  "duration": 25929.065047766624,
+  "nfe": 156,
+  "history": [
+    {
+      "seconds": 1.1462451000002147,
+      "duration": 27382.87187177883,
+      "nfe": 1,
+      "completed_within_deadline": true
+    },
+    {
+      "seconds": 3.9156197000002066,
+      "duration": 27026.31988383086,
+      "nfe": 5,
+      "completed_within_deadline": true
+    },
+    {
+      "seconds": 5.844635100000232,
+      "duration": 27005.827500820327,
+      "nfe": 7,
+      "completed_within_deadline": true
+    },
+    {
+      "seconds": 6.401760100000047,
+      "duration": 26266.184139012217,
+      "nfe": 8,
+      "completed_within_deadline": true
+    },
+    {
+      "seconds": 13.478902500000004,
+      "duration": 26245.836634303327,
+      "nfe": 16,
+      "completed_within_deadline": true
+    },
+    {
+      "seconds": 18.84119170000031,
+      "duration": 26228.54762901218,
+      "nfe": 24,
+      "completed_within_deadline": true
+    },
+    {
+      "seconds": 78.48200260000021,
+      "duration": 25929.065047766624,
+      "nfe": 99,
+      "completed_within_deadline": true
+    }
+  ],
+  "termination": "time_limit",
+  "search_runtime_seconds": 120.30373910000026,
+  "algorithm": "POA-Original",
+  "seed": 23,
+  "feasible": true,
+  "status": "completed",
+  "gap_to_bks_percent": 21.010370283278945,
+  "departure_times": [
+    0.0,
+    84934.52905037304,
+    81864.62021847873,
+    0.0
+  ],
+  "return_times": [
+    7698.964768602861,
+    87122.86076488612,
+    87471.32713379124,
+    10435.061649338157
+  ],
+  "validation_seconds": 0.0006717999999636959,
+  "best_duration_within_deadline": 25929.065047766624,
+  "time_limit_seconds": 120
+}

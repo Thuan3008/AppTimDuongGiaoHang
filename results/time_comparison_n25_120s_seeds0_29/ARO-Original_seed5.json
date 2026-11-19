@@ -1,0 +1,117 @@
+{
+  "routes": [
+    [
+      9,
+      15,
+      5,
+      11,
+      17,
+      22
+    ],
+    [
+      10,
+      4,
+      16,
+      8,
+      7
+    ],
+    [
+      18,
+      19,
+      12,
+      1,
+      20,
+      3,
+      25,
+      21,
+      14
+    ],
+    [
+      23,
+      24,
+      6,
+      13,
+      2
+    ]
+  ],
+  "duration": 25011.914688565106,
+  "nfe": 112,
+  "history": [
+    {
+      "seconds": 0.47677089999888267,
+      "duration": 27363.30641942523,
+      "nfe": 1,
+      "completed_within_deadline": true
+    },
+    {
+      "seconds": 3.172882599999866,
+      "duration": 26951.126243597806,
+      "nfe": 4,
+      "completed_within_deadline": true
+    },
+    {
+      "seconds": 25.002214500000264,
+      "duration": 26407.09793138304,
+      "nfe": 14,
+      "completed_within_deadline": true
+    },
+    {
+      "seconds": 45.82637059999979,
+      "duration": 26390.887404839075,
+      "nfe": 29,
+      "completed_within_deadline": true
+    },
+    {
+      "seconds": 53.40806679999878,
+      "duration": 25919.11572372674,
+      "nfe": 36,
+      "completed_within_deadline": true
+    },
+    {
+      "seconds": 60.140471400000024,
+      "duration": 25885.747187388843,
+      "nfe": 43,
+      "completed_within_deadline": true
+    },
+    {
+      "seconds": 64.39199589999953,
+      "duration": 25239.9964191607,
+      "nfe": 47,
+      "completed_within_deadline": true
+    },
+    {
+      "seconds": 95.21310369999992,
+      "duration": 25125.15235706143,
+      "nfe": 76,
+      "completed_within_deadline": true
+    },
+    {
+      "seconds": 106.94675970000026,
+      "duration": 25011.914688565106,
+      "nfe": 87,
+      "completed_within_deadline": true
+    }
+  ],
+  "termination": "time_limit",
+  "search_runtime_seconds": 121.34389329999976,
+  "algorithm": "ARO-Original",
+  "seed": 5,
+  "feasible": true,
+  "status": "completed",
+  "gap_to_bks_percent": 16.730049941301274,
+  "departure_times": [
+    0.0,
+    82766.70202286323,
+    0.0,
+    0.0
+  ],
+  "return_times": [
+    7780.17752585889,
+    86861.42933557031,
+    8943.295203118338,
+    4193.714646880799
+  ],
+  "validation_seconds": 0.0008875999992596917,
+  "best_duration_within_deadline": 25011.914688565106,
+  "time_limit_seconds": 120
+}

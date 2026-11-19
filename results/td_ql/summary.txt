@@ -1,0 +1,11 @@
+Algorithm : TD-QL (Tabular Q-Learning Local Search)
+Instance  : poryos-hong_kong-n50-hyb-bpr-heavy
+Duration  : 59450.837 s
+BKS       : 56491.298 s
+Gap(%)    : 5.2389%
+Routes    : 4
+Runtime   : 76.89 s
+Steps     : 20
+Accepted  : 13
+RouteEvals: 1018
+CacheHits : 159

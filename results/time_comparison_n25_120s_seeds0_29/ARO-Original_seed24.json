@@ -1,0 +1,105 @@
+{
+  "routes": [
+    [
+      1,
+      13,
+      11,
+      5,
+      22
+    ],
+    [
+      2
+    ],
+    [
+      7,
+      24,
+      9,
+      3,
+      8,
+      25,
+      20,
+      10,
+      4,
+      16,
+      23,
+      17
+    ],
+    [
+      14,
+      15,
+      6,
+      21,
+      12,
+      18,
+      19
+    ]
+  ],
+  "duration": 25314.67897752839,
+  "nfe": 166,
+  "history": [
+    {
+      "seconds": 1.427741900000001,
+      "duration": 28267.429157913677,
+      "nfe": 1,
+      "completed_within_deadline": true
+    },
+    {
+      "seconds": 3.1814911000001302,
+      "duration": 26571.44448634673,
+      "nfe": 3,
+      "completed_within_deadline": true
+    },
+    {
+      "seconds": 16.453050300000086,
+      "duration": 26370.342885346985,
+      "nfe": 19,
+      "completed_within_deadline": true
+    },
+    {
+      "seconds": 24.78453360000003,
+      "duration": 26045.954855238466,
+      "nfe": 30,
+      "completed_within_deadline": true
+    },
+    {
+      "seconds": 49.56091130000004,
+      "duration": 26013.956049254288,
+      "nfe": 68,
+      "completed_within_deadline": true
+    },
+    {
+      "seconds": 76.13765079999985,
+      "duration": 25546.28585378585,
+      "nfe": 97,
+      "completed_within_deadline": true
+    },
+    {
+      "seconds": 96.70544609999979,
+      "duration": 25314.67897752839,
+      "nfe": 118,
+      "completed_within_deadline": true
+    }
+  ],
+  "termination": "time_limit",
+  "search_runtime_seconds": 120.58923929999992,
+  "algorithm": "ARO-Original",
+  "seed": 24,
+  "feasible": true,
+  "status": "completed",
+  "gap_to_bks_percent": 18.143044148709308,
+  "departure_times": [
+    80876.82035365717,
+    86187.17454598674,
+    0.0,
+    78981.876780934
+  ],
+  "return_times": [
+    87024.3357961424,
+    86609.10921079078,
+    10255.77851738185,
+    87471.32713379127
+  ],
+  "validation_seconds": 0.0009030999999595224,
+  "best_duration_within_deadline": 25314.67897752839,
+  "time_limit_seconds": 120
+}

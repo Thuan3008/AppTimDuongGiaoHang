@@ -1,0 +1,99 @@
+{
+  "routes": [
+    [
+      1,
+      15,
+      8,
+      20,
+      7,
+      11
+    ],
+    [
+      2,
+      5,
+      6
+    ],
+    [
+      14,
+      25,
+      16,
+      13,
+      3,
+      21,
+      10,
+      4,
+      9,
+      12
+    ],
+    [
+      17,
+      18,
+      19,
+      22,
+      23,
+      24
+    ]
+  ],
+  "duration": 24062.360522675735,
+  "nfe": 169,
+  "history": [
+    {
+      "seconds": 3.828452300000208,
+      "duration": 27095.129505062334,
+      "nfe": 1,
+      "completed_within_deadline": true
+    },
+    {
+      "seconds": 4.551984800000355,
+      "duration": 26647.422472078422,
+      "nfe": 2,
+      "completed_within_deadline": true
+    },
+    {
+      "seconds": 7.709267100000943,
+      "duration": 25350.832880706068,
+      "nfe": 6,
+      "completed_within_deadline": true
+    },
+    {
+      "seconds": 24.16585440000017,
+      "duration": 24717.054332771455,
+      "nfe": 24,
+      "completed_within_deadline": true
+    },
+    {
+      "seconds": 54.577051700000084,
+      "duration": 24602.978416567807,
+      "nfe": 62,
+      "completed_within_deadline": true
+    },
+    {
+      "seconds": 88.35024800000065,
+      "duration": 24062.360522675735,
+      "nfe": 103,
+      "completed_within_deadline": true
+    }
+  ],
+  "termination": "time_limit",
+  "search_runtime_seconds": 120.81561020000117,
+  "algorithm": "ARO-Original",
+  "seed": 4,
+  "feasible": true,
+  "status": "completed",
+  "gap_to_bks_percent": 12.298501753712454,
+  "departure_times": [
+    0.0,
+    0.0,
+    77830.37696549139,
+    0.0
+  ],
+  "return_times": [
+    4045.1649330523155,
+    3557.9434545744293,
+    86701.87450107366,
+    7587.754599466723
+  ],
+  "validation_seconds": 0.0013466000000335043,
+  "best_duration_within_deadline": 24062.360522675735,
+  "time_limit_seconds": 120
+}

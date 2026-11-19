@@ -1,0 +1,83 @@
+[
+  {
+    "algorithm": "TD-ERAPO-Time",
+    "runs": 30,
+    "deterministic": false,
+    "best": 21433.250596205187,
+    "mean": 21861.363227992922,
+    "sd": 395.2273155178762,
+    "mean_gap_percent": 2.0264962983902715
+  },
+  {
+    "algorithm": "ARO-Original",
+    "runs": 30,
+    "deterministic": false,
+    "best": 23914.44410125347,
+    "mean": 24595.556241691454,
+    "sd": 413.48742646313366,
+    "mean_gap_percent": 14.786914323648466
+  },
+  {
+    "algorithm": "POA-Original",
+    "runs": 30,
+    "deterministic": false,
+    "best": 24640.514648368335,
+    "mean": 25398.544177618656,
+    "sd": 381.83464159889013,
+    "mean_gap_percent": 18.534441173558026
+  },
+  {
+    "algorithm": "GA",
+    "runs": 30,
+    "deterministic": false,
+    "best": 21479.579362938883,
+    "mean": 22732.89401364677,
+    "sd": 516.0952164150136,
+    "mean_gap_percent": 6.093911104553273
+  },
+  {
+    "algorithm": "GA-LS",
+    "runs": 30,
+    "deterministic": false,
+    "best": 22705.28956466218,
+    "mean": 23474.273583185604,
+    "sd": 475.646192589889,
+    "mean_gap_percent": 9.553913077824546
+  },
+  {
+    "algorithm": "TD-Insertion",
+    "runs": 1,
+    "deterministic": true,
+    "best": 23948.931283308335,
+    "mean": 23948.931283308335,
+    "sd": null,
+    "mean_gap_percent": 11.769130014642283
+  },
+  {
+    "algorithm": "TD-Savings",
+    "runs": 1,
+    "deterministic": true,
+    "best": 22016.484457769395,
+    "mean": 22016.484457769395,
+    "sd": null,
+    "mean_gap_percent": 2.75044363006105
+  },
+  {
+    "algorithm": "TD-Local-Search",
+    "runs": 1,
+    "deterministic": true,
+    "best": 21886.437608393986,
+    "mean": 21886.437608393986,
+    "sd": null,
+    "mean_gap_percent": 2.1435178744234396
+  },
+  {
+    "algorithm": "Greedy",
+    "runs": 1,
+    "deterministic": true,
+    "best": 24968.209329982274,
+    "mean": 24968.209329982274,
+    "sd": null,
+    "mean_gap_percent": 16.526078004182487
+  }
+]

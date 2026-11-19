@@ -1,0 +1,63 @@
+[
+  {
+    "dataset": "n100",
+    "primary": "RAPO-2709",
+    "baseline": "ARO-Original",
+    "paired_seeds": 5,
+    "primary_wins": 5,
+    "ties": 0,
+    "primary_losses": 0,
+    "mean_baseline_minus_primary_seconds": 26358.65318741554,
+    "median_baseline_minus_primary_seconds": 26384.939919166194,
+    "two_sided_sign_test_p": 0.0625
+  },
+  {
+    "dataset": "n100",
+    "primary": "RAPO-2709",
+    "baseline": "GA",
+    "paired_seeds": 5,
+    "primary_wins": 5,
+    "ties": 0,
+    "primary_losses": 0,
+    "mean_baseline_minus_primary_seconds": 22890.74594750064,
+    "median_baseline_minus_primary_seconds": 23805.909342759405,
+    "two_sided_sign_test_p": 0.0625
+  },
+  {
+    "dataset": "n100",
+    "primary": "RAPO-2709",
+    "baseline": "GA-LS",
+    "paired_seeds": 5,
+    "primary_wins": 5,
+    "ties": 0,
+    "primary_losses": 0,
+    "mean_baseline_minus_primary_seconds": 20705.892687731994,
+    "median_baseline_minus_primary_seconds": 20248.826237588684,
+    "two_sided_sign_test_p": 0.0625
+  },
+  {
+    "dataset": "n100",
+    "primary": "RAPO-2709",
+    "baseline": "POA-Original",
+    "paired_seeds": 5,
+    "primary_wins": 5,
+    "ties": 0,
+    "primary_losses": 0,
+    "mean_baseline_minus_primary_seconds": 31526.777650274325,
+    "median_baseline_minus_primary_seconds": 31301.544159646102,
+    "two_sided_sign_test_p": 0.0625
+  },
+  {
+    "dataset": "n100",
+    "primary": "RAPO-2709",
+    "baseline": "Greedy",
+    "paired_seeds": 5,
+    "primary_wins": 5,
+    "ties": 0,
+    "primary_losses": 0,
+    "mean_baseline_minus_primary_seconds": 13802.214678327025,
+    "median_baseline_minus_primary_seconds": 13595.753151689263,
+    "two_sided_sign_test_p": null,
+    "statistical_note": "Greedy is one deterministic reference, so no paired significance test is claimed"
+  }
+]

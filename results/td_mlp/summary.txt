@@ -1,0 +1,7 @@
+Algorithm : TD-MLP (PyTorch Neural Insertion)
+Instance  : poryos-hong_kong-n50-hyb-bpr-heavy
+Duration  : 61279.955 s
+BKS       : 56491.298 s
+Gap(%)    : 8.4768%
+Routes    : 4
+Runtime   : 2.37 s

@@ -1,0 +1,6 @@
+streamlit==1.56.0
+numpy==2.4.6
+pandas==2.3.3
+plotly==7.1.0
+mamut-routing-lib==0.12.0
+Pillow==12.3.0

@@ -1,0 +1,7 @@
+{
+  "instance_name": "hcmc-n100-heavy",
+  "routes": [[3, 9, 2, 1]],
+  "cost": 12345.67,
+  "objective_function": "Duration",
+  "metadata": {"algorithm": "MS-IRAPO", "seed": 42}
+}

@@ -1,0 +1,2 @@
+﻿algorithm,runs_requested,runs_completed,runs_failed,feasible_rate,best,mean,median,standard_deviation,runtime_mean_seconds,runtime_median_seconds,runtime_standard_deviation,best_gap_to_bks_percent,mean_gap_to_bks_percent
+RAPO-2709,30,30,0,1.0,21664.784335418743,22188.97431210185,22182.45666195955,223.97566091254194,48.85855885000001,46.76511070000106,6.526424196247447,0.13609415894063068,2.5589355798219198

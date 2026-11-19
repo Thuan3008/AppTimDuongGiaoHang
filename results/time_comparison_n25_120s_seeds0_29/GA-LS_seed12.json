@@ -1,0 +1,189 @@
+{
+  "routes": [
+    [
+      2,
+      21,
+      9
+    ],
+    [
+      5,
+      1,
+      15,
+      6,
+      18,
+      19
+    ],
+    [
+      7,
+      20,
+      11,
+      3,
+      12,
+      24,
+      23,
+      22,
+      17
+    ],
+    [
+      13,
+      4,
+      10,
+      14,
+      25,
+      16,
+      8
+    ]
+  ],
+  "duration": 22915.278303828396,
+  "nfe": 616,
+  "history": [
+    {
+      "seconds": 1.014731799998117,
+      "duration": 27208.64856107581,
+      "nfe": 1,
+      "completed_within_deadline": true
+    },
+    {
+      "seconds": 3.59203019999768,
+      "duration": 25620.623954696035,
+      "nfe": 4,
+      "completed_within_deadline": true
+    },
+    {
+      "seconds": 11.070267399998556,
+      "duration": 25401.899623033678,
+      "nfe": 14,
+      "completed_within_deadline": true
+    },
+    {
+      "seconds": 17.159235099999933,
+      "duration": 25381.12214683141,
+      "nfe": 42,
+      "completed_within_deadline": true
+    },
+    {
+      "seconds": 18.38479720000032,
+      "duration": 25163.49595981898,
+      "nfe": 44,
+      "completed_within_deadline": true
+    },
+    {
+      "seconds": 27.26717869999993,
+      "duration": 24838.392992866084,
+      "nfe": 74,
+      "completed_within_deadline": true
+    },
+    {
+      "seconds": 31.387425199998688,
+      "duration": 24727.725352519585,
+      "nfe": 101,
+      "completed_within_deadline": true
+    },
+    {
+      "seconds": 36.337574599998334,
+      "duration": 24375.248200485657,
+      "nfe": 118,
+      "completed_within_deadline": true
+    },
+    {
+      "seconds": 44.46825429999808,
+      "duration": 24264.76033975686,
+      "nfe": 151,
+      "completed_within_deadline": true
+    },
+    {
+      "seconds": 48.759351400000014,
+      "duration": 24174.87294429131,
+      "nfe": 170,
+      "completed_within_deadline": true
+    },
+    {
+      "seconds": 55.75769450000007,
+      "duration": 24025.913720751883,
+      "nfe": 189,
+      "completed_within_deadline": true
+    },
+    {
+      "seconds": 56.18653529999938,
+      "duration": 23736.27824459798,
+      "nfe": 193,
+      "completed_within_deadline": true
+    },
+    {
+      "seconds": 56.80098429999998,
+      "duration": 23726.084895683533,
+      "nfe": 196,
+      "completed_within_deadline": true
+    },
+    {
+      "seconds": 65.10198329999912,
+      "duration": 23627.83055627362,
+      "nfe": 239,
+      "completed_within_deadline": true
+    },
+    {
+      "seconds": 67.5416957999987,
+      "duration": 23587.25467348863,
+      "nfe": 254,
+      "completed_within_deadline": true
+    },
+    {
+      "seconds": 76.30405070000052,
+      "duration": 23508.946304512967,
+      "nfe": 310,
+      "completed_within_deadline": true
+    },
+    {
+      "seconds": 79.52693739999813,
+      "duration": 23412.06254710775,
+      "nfe": 337,
+      "completed_within_deadline": true
+    },
+    {
+      "seconds": 84.34443269999974,
+      "duration": 23273.859428451644,
+      "nfe": 369,
+      "completed_within_deadline": true
+    },
+    {
+      "seconds": 84.48566109999956,
+      "duration": 23136.5122739995,
+      "nfe": 370,
+      "completed_within_deadline": true
+    },
+    {
+      "seconds": 98.62286400000085,
+      "duration": 22931.33489112671,
+      "nfe": 463,
+      "completed_within_deadline": true
+    },
+    {
+      "seconds": 106.91076350000003,
+      "duration": 22915.278303828396,
+      "nfe": 520,
+      "completed_within_deadline": true
+    }
+  ],
+  "termination": "time_limit",
+  "search_runtime_seconds": 120.02056420000008,
+  "algorithm": "GA-LS",
+  "seed": 12,
+  "feasible": true,
+  "status": "completed",
+  "gap_to_bks_percent": 6.9450945331910985,
+  "departure_times": [
+    0.0,
+    79696.48031816298,
+    79290.94705175918,
+    0.0
+  ],
+  "return_times": [
+    2113.451224289041,
+    87471.32713379127,
+    86993.37977637754,
+    5324.547539292711
+  ],
+  "validation_seconds": 0.0006042999993951526,
+  "best_duration_within_deadline": 22915.278303828396,
+  "time_limit_seconds": 120
+}

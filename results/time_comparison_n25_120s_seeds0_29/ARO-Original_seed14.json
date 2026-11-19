@@ -1,0 +1,117 @@
+{
+  "routes": [
+    [
+      1,
+      6,
+      18,
+      19
+    ],
+    [
+      3,
+      20,
+      15,
+      2,
+      13,
+      10
+    ],
+    [
+      24,
+      17,
+      22,
+      12,
+      14,
+      16,
+      21
+    ],
+    [
+      25,
+      4,
+      8,
+      7,
+      5,
+      11,
+      9,
+      23
+    ]
+  ],
+  "duration": 24947.611415045507,
+  "nfe": 221,
+  "history": [
+    {
+      "seconds": 0.9025169000015012,
+      "duration": 28718.44875633473,
+      "nfe": 1,
+      "completed_within_deadline": true
+    },
+    {
+      "seconds": 1.3645023999997647,
+      "duration": 26432.487136582567,
+      "nfe": 2,
+      "completed_within_deadline": true
+    },
+    {
+      "seconds": 16.62898850000056,
+      "duration": 26055.637755964657,
+      "nfe": 19,
+      "completed_within_deadline": true
+    },
+    {
+      "seconds": 20.44497179999962,
+      "duration": 25794.613456562845,
+      "nfe": 24,
+      "completed_within_deadline": true
+    },
+    {
+      "seconds": 47.94011930000124,
+      "duration": 25656.96339449518,
+      "nfe": 57,
+      "completed_within_deadline": true
+    },
+    {
+      "seconds": 72.5205406999994,
+      "duration": 25487.859746811057,
+      "nfe": 110,
+      "completed_within_deadline": true
+    },
+    {
+      "seconds": 75.52652400000079,
+      "duration": 25434.092720206507,
+      "nfe": 117,
+      "completed_within_deadline": true
+    },
+    {
+      "seconds": 85.75560509999923,
+      "duration": 25203.526299702233,
+      "nfe": 137,
+      "completed_within_deadline": true
+    },
+    {
+      "seconds": 98.84743280000112,
+      "duration": 24947.611415045507,
+      "nfe": 157,
+      "completed_within_deadline": true
+    }
+  ],
+  "termination": "time_limit",
+  "search_runtime_seconds": 120.10097669999959,
+  "algorithm": "ARO-Original",
+  "seed": 14,
+  "feasible": true,
+  "status": "completed",
+  "gap_to_bks_percent": 16.42994799297808,
+  "departure_times": [
+    82270.38705519387,
+    0.0,
+    0.0,
+    77973.28714563415
+  ],
+  "return_times": [
+    87471.32713379127,
+    3775.342066019661,
+    7131.238840957878,
+    86813.37757510472
+  ],
+  "validation_seconds": 0.0006155999981274363,
+  "best_duration_within_deadline": 24947.611415045507,
+  "time_limit_seconds": 120
+}

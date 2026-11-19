@@ -1,0 +1,7 @@
+{
+  "depot": {"id": 0, "x": 50, "y": 50},
+  "vehicle_count": 5,
+  "vehicle_capacity": 70,
+  "base_speed": 24,
+  "traffic_multipliers": {"normal": 1.0, "morning_peak": 1.5, "evening_peak": 1.7}
+}

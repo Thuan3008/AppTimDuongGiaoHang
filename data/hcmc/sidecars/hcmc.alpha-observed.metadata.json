@@ -1,0 +1,12 @@
+{
+  "format": "hcmc-observed-traffic-factor",
+  "format_version": 1,
+  "source": "data\\vantoctb\\vietnam-road-traffic-observations.parquet",
+  "output": "data\\hcmc\\sidecars\\hcmc.alpha-observed.parquet",
+  "rows": 54157,
+  "way_count": 77,
+  "alpha_definition": "max(1, freeFlowSpeed/currentSpeed)",
+  "alpha_time_definition": "max(1, currentTravelTime/freeFlowTravelTime)",
+  "usable_definition": "not roadClosure and confidence >= 0.8",
+  "mapping_status": "OSM way_id not mapped to synthetic E00001-style graph edges"
+}

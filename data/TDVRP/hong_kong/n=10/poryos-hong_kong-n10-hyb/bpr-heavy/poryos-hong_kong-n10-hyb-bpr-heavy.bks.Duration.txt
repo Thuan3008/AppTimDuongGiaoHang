@@ -1,0 +1,155 @@
+Ý nghĩa từng biến
+
+instance_name: Tên bộ dữ liệu mà nghiệm này thuộc về.
+instance_name
+"instance_name": "poryos-hong_kong-n10-hyb-bpr-heavy"
+Ý nghĩa:
+- hong_kong: dữ liệu đường Hong Kong.
+- n10: có 10 khách hàng, không tính kho.
+- hyb: phương pháp tạo điểm khách hàng dạng hybrid.
+- bpr: mô hình giao thông BPR.
+- heavy: mức giao thông nặng.
+
+
+routes: Thứ tự khách hàng được phân cho từng xe.
+routes
+"routes": [
+    [3, 9, 2, 1],
+    [7, 6, 8, 5],
+    [10, 4]
+]
+Có ba route, tương ứng ba xe được sử dụng. Kho không được ghi trực tiếp mà được hiểu ngầm ở đầu và cuối mỗi route:
+Xe 1: Kho → 3 → 9 → 2 → 1 → Kho
+Xe 2: Kho → 7 → 6 → 8 → 5 → Kho
+Xe 3: Kho → 10 → 4 → Kho
+Tất cả 10 khách hàng xuất hiện đúng một lần.
+
+
+
+cost: Tổng giá trị hàm mục tiêu của toàn bộ nghiệm, đơn vị giây.
+cost
+"cost": 12402.455167420656
+Đây là tổng Duration của ba route:
+\[
+F = T_1 + T_2 + T_3
+\]
+\[
+F
+=4292.193981
++5129.710478
++2980.550708
+=12402.455167\text{ giây}
+\]
+Tương đương khoảng:
+3 giờ 26 phút 42,46 giây
+Duration của mỗi route được tính tuần tự:
+\[
+T_k=\text{thời điểm xe về kho}-\text{thời điểm xe xuất phát}
+\]
+Nó bao gồm:
+- Thời gian di chuyển phụ thuộc thời điểm.
+- Thời gian phục vụ tại khách hàng.
+- Waiting time nếu bài toán có time window và xe phải chờ.
+- Thời gian quay lại kho.
+Tuy nhiên, cost này là tổng thời lượng hoạt động của các xe, không phải thời điểm xe cuối cùng hoàn thành. Nếu tối ưu thời điểm hoàn thành muộn nhất thì đó là mục tiêu makespan, không phải Duration.
+
+
+
+
+
+
+route_durations
+"route_durations": [
+    4292.193981399652,
+    5129.710478311927,
+    2980.550707709077
+]
+Thời lượng từng route:
+Xe	Route	Duration
+1	3 → 9 → 2 → 1	1 giờ 11 phút 32,19 giây
+2	7 → 6 → 8 → 5	1 giờ 25 phút 29,71 giây
+3	10 → 4	49 phút 40,55 giây
+
+
+
+
+
+route_departure_times
+"route_departure_times": [0.0, 0.0, 0.0]
+Ba xe đều xuất phát tại thời điểm 0 của horizon:
+Xe 1: 0 giây
+Xe 2: 0 giây
+Xe 3: 0 giây
+Trong bộ này, giờ xuất phát không được tối ưu; tất cả xe xuất phát từ đầu ngày mô phỏng. Nếu mốc 0 được quy ước là 00:00 thì chúng xuất phát lúc 00:00.
+Do đó bộ Hong Kong này có lưu giờ xuất phát, nhưng cả ba đều đang cố định bằng 0, chứ không phải mỗi xe đã được tối ưu một giờ riêng.
+
+
+
+
+
+Thông tin nguồn nghiệm
+"authors": "Florian Rascoussier (0nyr)"
+Người tạo hoặc công bố nghiệm.
+"source": "kayros 0.4.0 TD-ILS (seed=7, time_limit=120s)"
+Nghiệm ban đầu được tìm bằng thuật toán TD-ILS:
+- seed=7: seed ngẫu nhiên.
+- time_limit=120s: chạy tối đa 120 giây.
+"validated_by": "mamut-routing-lib td Duration checker"
+Nghiệm được kiểm tra lại bằng bộ kiểm định mamut-routing-lib.
+"validated_cost": 12402.455167420656
+Bộ kiểm định tính lại và thu được cost giống hoàn toàn với cost đã lưu.
+"validated_num_routes": 3
+Xác nhận nghiệm dùng ba route, tức ba xe.
+
+
+
+
+
+optimality
+"proven": true
+Nghiệm này không chỉ là nghiệm tốt nhất đã tìm thấy mà đã được chứng minh là tối ưu toàn cục theo đúng mô hình và checker của bộ dữ liệu.
+"proven_optimum": 12402.455167420656
+Giá trị tối ưu đã được chứng minh.
+"dual_bound": 12402.455167420656
+Cận dưới bằng đúng nghiệm tìm được:
+\[
+\text{dual bound}=\text{solution cost}
+\]
+Vì hai giá trị bằng nhau nên không còn khoảng cách tối ưu:
+\[
+\text{optimality gap}=0
+\]
+"wall_time_s": 2.86
+Bộ chứng minh tối ưu chạy trong 2,86 giây.
+"time_limit_s": 600.0
+Giới hạn thời gian được cấp là 600 giây.
+"prover": "kayros 1.5.1 ... branch-price-and-cut"
+Công cụ dùng phương pháp Branch-Price-and-Cut để chứng minh nghiệm tối ưu. Đây không phải RAPO.
+Tóm gọn:
+File VRP chính
+→ chứa khách hàng, demand, service time, graph và traffic
+
+Road + traffic
+→ sinh ATF
+
+Thuật toán
+→ tìm thứ tự khách và chia route
+
+File BKS này
+→ lưu nghiệm chuẩn để so sánh kết quả thuật toán
+Khi chạy RAPO trên bộ này, mày so sánh fitness của RAPO với:
+BKS tối ưu = 12402.455167 giây
+Nếu RAPO cũng đạt giá trị đó thì đạt nghiệm tối ưu; nếu lớn hơn thì tính sai lệch:
+\[
+Gap(\%)=
+\frac{F_{\text{RAPO}}-F_{\text{BKS}}}
+{F_{\text{BKS}}}\times100
+\]
+
+
+
+
+
+metadata: Thông tin nguồn gốc, kiểm định và chứng minh nghiệm.
+
+objective_function: Hàm mục tiêu được tối ưu. Duration là tổng thời lượng các tuyến.

@@ -1,0 +1,348 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <title>RAPO · Bản đồ tuyến giao hàng</title>
+  
+  <!-- Leaflet CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+
+  <!-- Modular CSS Design System -->
+  <link rel="stylesheet" href="/static/css/variables.css">
+  <link rel="stylesheet" href="/static/css/layout.css">
+  <link rel="stylesheet" href="/static/css/components.css">
+</head>
+<body>
+
+  <!-- Màn hình Đăng nhập (Modal / Login Screen) -->
+  <div id="login-screen" class="login-screen">
+    <form id="login-form" class="login-card" onsubmit="if(window.handleLoginSubmit){window.handleLoginSubmit(event);}return false;">
+      <div class="eyebrow">RAPO DELIVERY</div>
+      <h2>Đăng nhập hệ thống</h2>
+      
+      <div class="form-group">
+        <label for="login-username">Tài khoản</label>
+        <input id="login-username" type="text" autocomplete="username" placeholder="Nhập tên đăng nhập" required>
+      </div>
+
+      <div class="form-group">
+        <label for="login-password">Mật khẩu</label>
+        <input id="login-password" type="password" autocomplete="current-password" placeholder="Nhập mật khẩu" required>
+      </div>
+
+      <button type="button" id="login-submit" onclick="if(window.handleLoginSubmit){window.handleLoginSubmit(event);}">Đăng nhập</button>
+      <div id="login-error" class="status error hidden"></div>
+      <p class="muted" style="margin-top: 14px;">Đăng nhập bằng tài khoản Điều phối (Admin) hoặc Tài xế (Driver).</p>
+    </form>
+  </div>
+
+  <!-- Header -->
+  <header>
+    <div class="brand-section">
+      <div class="eyebrow">RAPO / TDVRP LOGISTICS</div>
+      <h1>Bản đồ tuyến giao hàng</h1>
+      <p class="header-sub">Hệ thống điều phối tối ưu đa phương thức</p>
+    </div>
+    
+    <div class="auth-bar">
+      <span id="user-badge"></span>
+      <button class="secondary hidden" id="logout" type="button">Đăng xuất</button>
+      <button class="secondary" id="theme-toggle" type="button">🌙 Dark</button>
+      <span id="clock">Sẵn sàng</span>
+    </div>
+  </header>
+
+  <!-- Khung ứng dụng chính -->
+  <main id="app-main" class="hidden">
+
+    <!-- CỘT 1: SIDEBAR (Trên Mobile hoạt động như Bottom Sheet) -->
+    <aside class="sidebar bottom-sheet" id="bottom-sheet">
+      <!-- Handle vuốt trượt trên Mobile -->
+      <div class="bottom-sheet-handle-wrap" id="sheet-handle" title="Vuốt hoặc bấm để mở rộng">
+        <div class="bottom-sheet-handle"></div>
+      </div>
+
+      <!-- Tab Switcher (Chỉ hiển thị trên Mobile) -->
+      <div class="mobile-tabs" id="mobile-tabs">
+        <button type="button" class="tab-btn active" id="tab-dispatch">📋 Chuyến & Cài đặt</button>
+        <button type="button" class="tab-btn" id="tab-results">📍 Lộ trình & Kết quả</button>
+      </div>
+
+      <!-- Tab Pane 1: Điều phối, Tạo chuyến, Cài đặt -->
+      <div class="tab-pane active" id="panel-dispatch">
+        <!-- Khu vực quản lý dành cho Admin -->
+        <div id="admin-controls">
+          <h2>Tạo chuyến giao hàng</h2>
+          <select id="driver" class="hidden" aria-hidden="true" tabindex="-1"></select>
+          
+          <div class="form-group">
+            <label for="trip-name">Tên chuyến</label>
+            <input id="trip-name" type="text" maxlength="100" placeholder="Ví dụ: Giao hàng ca sáng">
+          </div>
+
+          <div class="form-group">
+            <label for="dataset">Dataset / nền giao thông</label>
+            <select id="dataset"></select>
+          </div>
+
+          <label class="check">
+            <input id="manual-toggle" type="checkbox"> Tự nhập kho và các điểm giao
+          </label>
+
+          <!-- Khối nhập thủ công điểm giao -->
+          <div id="manual-fields" class="manual-fields hidden">
+            <p class="muted">Tọa độ gần road graph TP.HCM sẽ được tự động ghép vào nút giao thông gần nhất.</p>
+            
+            <div class="manual-grid">
+              <div class="form-group">
+                <label for="manual-vehicles">Số xe</label>
+                <input id="manual-vehicles" type="number" min="1" max="50" value="1">
+              </div>
+              <div class="form-group">
+                <label for="manual-capacity">Tải trọng mỗi xe</label>
+                <input id="manual-capacity" type="number" min="0.01" step="any" value="100">
+              </div>
+            </div>
+
+            <h3>Kho xuất phát (Depot)</h3>
+            <div class="form-group">
+              <label for="depot-name">Tên kho</label>
+              <input id="depot-name" type="text" maxlength="100" value="Kho">
+            </div>
+
+            <label for="depot-address">Địa chỉ kho</label>
+            <div class="address-line">
+              <input id="depot-address" type="text" maxlength="300" placeholder="140 Lê Trọng Tấn, Tân Phú, TP.HCM">
+              <button id="find-depot" class="secondary" type="button">Tìm</button>
+            </div>
+            <div id="depot-geocode-note" class="geocode-note">Nhập địa chỉ rồi bấm Tìm hoặc Xem điểm.</div>
+
+            <details class="coord-advanced">
+              <summary>Tọa độ nâng cao (tùy chọn)</summary>
+              <div class="manual-grid">
+                <div><label for="depot-lat">Vĩ độ</label><input id="depot-lat" type="number" step="any" placeholder="Tự điền"></div>
+                <div><label for="depot-lon">Kinh độ</label><input id="depot-lon" type="number" step="any" placeholder="Tự điền"></div>
+              </div>
+            </details>
+
+            <h3>Các điểm giao</h3>
+            <div id="delivery-points"></div>
+            
+            <div class="manual-actions">
+              <button id="add-point" class="secondary" type="button">+ Thêm điểm</button>
+              <button id="preview-points" class="secondary" type="button">Xem điểm</button>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label>Thuật toán tối ưu</label>
+            <div id="algorithm-list"></div>
+          </div>
+
+          <div class="manual-grid">
+            <div class="form-group">
+              <label for="population">Quần thể (P)</label>
+              <input id="population" type="number" min="2" max="50" value="10">
+            </div>
+            <div class="form-group">
+              <label for="budget">NFE / seed</label>
+              <input id="budget" type="number" min="2" max="10000" value="290">
+            </div>
+          </div>
+
+          <div class="manual-grid">
+            <div class="form-group">
+              <label for="seed">Seed bắt đầu</label>
+              <input id="seed" type="number" min="0" max="999999" value="0">
+            </div>
+            <div class="form-group">
+              <label for="num-seeds">Số seed</label>
+              <input id="num-seeds" type="number" min="1" max="100" value="1">
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label for="earliest-departure">Giờ xuất phát sớm nhất</label>
+            <input id="earliest-departure" type="time" value="08:00">
+          </div>
+
+          <p id="seed-plan" class="muted"></p>
+          <button id="run" disabled>Tạo và tối ưu chuyến</button>
+
+          <!-- Thêm tài xế mới -->
+          <div class="compact-form">
+            <h2>Thêm tài xế mới</h2>
+            <div class="form-group">
+              <label for="new-driver-username">Tài khoản</label>
+              <input id="new-driver-username" type="text" placeholder="Tên đăng nhập">
+            </div>
+            <div class="form-group">
+              <label for="new-driver-password">Mật khẩu</label>
+              <input id="new-driver-password" type="password" minlength="8" placeholder="Tối thiểu 8 ký tự">
+            </div>
+            <button id="add-driver" class="secondary" type="button">Tạo tài khoản Driver</button>
+          </div>
+        </div>
+
+        <!-- Khu vực thông báo dành cho Driver -->
+        <div id="driver-controls" class="hidden">
+          <p class="muted">Bạn đang xem danh sách các chuyến được giao riêng cho tài khoản của bạn.</p>
+        </div>
+
+        <!-- Danh sách chuyến -->
+        <h2 id="trip-list-title">Các chuyến đã tạo</h2>
+        <div id="trip-list"></div>
+
+        <!-- Trạng thái tiến trình -->
+        <div id="status" class="status" role="status" aria-live="polite">Đang nạp dữ liệu…</div>
+        <p id="admin-note" class="muted">Các thuật toán dùng chung quần thể ban đầu và ngân sách NFE. Chuyến được phân bổ trực tiếp cho Driver.</p>
+      </div>
+
+      <!-- Tab Pane 2: Chứa kết quả khi xem trên Mobile -->
+      <div class="tab-pane" id="panel-results-mobile">
+        <!-- Vùng này sẽ tự động gắn #results-container khi chuyển sang màn hình Mobile -->
+      </div>
+    </aside>
+
+    <!-- CỘT 2: WORKSPACE (Bản đồ + Bảng kết quả trên Desktop) -->
+    <section class="workspace">
+      
+      <!-- Khối Bản đồ chính -->
+      <div class="map-panel">
+        <div class="toolbar">
+          <h2>Lộ trình trên OpenStreetMap</h2>
+          <div style="display: flex; gap: 8px; align-items: center;">
+            <select id="result-algorithm" aria-label="Thuật toán hiển thị" class="hidden"></select>
+            <button class="secondary" id="fit">Xem toàn bộ điểm</button>
+          </div>
+        </div>
+        
+        <div id="map"></div>
+        <div id="tile-warning" role="status"></div>
+        <div id="warnings"></div>
+      </div>
+
+      <!-- Khối Kết quả, Số liệu và Lộ trình -->
+      <div class="results-section" id="results-container">
+        
+        <!-- Các thẻ đo lường chính (Metric Cards) -->
+        <div class="metrics">
+          <div class="metric">
+            <span>Khách hàng</span>
+            <strong id="customers">—</strong>
+          </div>
+          <div class="metric">
+            <span id="duration-label">Fitness (giây)</span>
+            <strong id="fitness">—</strong>
+          </div>
+          <div class="metric">
+            <span>Tuyến xe</span>
+            <strong id="route-count">—</strong>
+          </div>
+          <div class="metric" id="runtime-metric">
+            <span>Thời gian chạy (s)</span>
+            <strong id="runtime">—</strong>
+          </div>
+          <div class="metric" id="seed-metric">
+            <span>Seed tốt nhất</span>
+            <strong id="best-seed">—</strong>
+          </div>
+        </div>
+
+        <!-- Bảng thông tin các tuyến đường xe chạy -->
+        <div class="panel">
+          <div class="toolbar">
+            <h2>Thông tin các tuyến</h2>
+            <div>
+              <button id="btn-fit-map" class="secondary" title="Xem toàn cảnh các xe trên bản đồ">🔍 Toàn cảnh</button>
+              <button id="json" class="secondary" disabled>Tải JSON</button>
+              <button id="csv" class="secondary" disabled>Tải CSV</button>
+            </div>
+          </div>
+          <p id="evaluation-note" class="muted">Thời gian từ dataset · Objective = di chuyển + phục vụ. Bấm vào hàng để xem riêng từng tuyến.</p>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Xe</th>
+                  <th>Thứ tự ghé thăm</th>
+                  <th>Tải hàng</th>
+                  <th>Khởi hành</th>
+                  <th>Di chuyển (s)</th>
+                  <th>Phục vụ (s)</th>
+                  <th>Duration (s)</th>
+                  <th>Nguồn đường vẽ</th>
+                  <th>Giao tuyến</th>
+                </tr>
+              </thead>
+              <tbody id="routes">
+                <tr><td colspan="9">Chưa có kết quả.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Timeline chi tiết của từng điểm giao trong nghiệm đang hiển thị -->
+        <div class="panel hidden" id="itinerary-panel">
+          <div class="toolbar">
+            <div>
+              <h2>Lộ trình chi tiết theo điểm giao</h2>
+              <p class="muted itinerary-note">ETA và thời gian chặng được lấy từ bộ đánh giá TDVRP, không lấy từ đường vẽ OSRM.</p>
+            </div>
+          </div>
+          <div id="itinerary-routes"></div>
+        </div>
+
+        <!-- Bảng tiến độ từng điểm giao hàng cho Driver -->
+        <div class="panel hidden" id="stops-panel">
+          <h2>Tiến độ từng điểm giao</h2>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Thứ tự</th>
+                  <th>Khách hàng</th>
+                  <th>Trạng thái</th>
+                  <th>Hoàn thành lúc</th>
+                  <th>Thao tác</th>
+                </tr>
+              </thead>
+              <tbody id="stop-rows"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Bảng đối chứng cùng lượt chạy -->
+        <div class="panel hidden" id="comparison">
+          <h2>Kết quả cùng lượt chạy</h2>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Thuật toán</th>
+                  <th>Seed tốt nhất</th>
+                  <th>Fitness (s)</th>
+                  <th>NFE</th>
+                  <th>Runtime (s)</th>
+                  <th>Departure evaluator</th>
+                </tr>
+              </thead>
+              <tbody id="comparison-rows"></tbody>
+            </table>
+          </div>
+          <p class="muted">RAPO dùng departure exact; Pufferfish và GA xuất trace với departure quét lưới.</p>
+        </div>
+
+      </div>
+    </section>
+
+  </main>
+
+  <!-- Leaflet JS -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <!-- Modular Application Script (ES Module) -->
+  <script type="module" src="/static/js/app.js?v=20261108_6"></script>
+</body>
+</html>

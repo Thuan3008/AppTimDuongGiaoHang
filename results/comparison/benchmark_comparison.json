@@ -1,0 +1,36 @@
+{
+  "benchmark": "Hong Kong n50 HYB BPR-heavy",
+  "bks_duration_seconds": 56491.297731683575,
+  "results": [
+    {
+      "algorithm": "RAPO",
+      "duration": 57150.0,
+      "gap_pct": 1.1660243166037003,
+      "runtime_seconds": 85.0
+    },
+    {
+      "algorithm": "TD-QL",
+      "duration": 59450.836538199146,
+      "gap_pct": 5.2389286940662565,
+      "runtime_seconds": 76.89163510000003
+    },
+    {
+      "algorithm": "TD-MLP",
+      "duration": 61279.955,
+      "gap_pct": 8.476805208230633,
+      "runtime_seconds": 2.37
+    },
+    {
+      "algorithm": "TD-XGB",
+      "duration": 61276.778,
+      "gap_pct": 8.471181333178066,
+      "runtime_seconds": 74.54
+    },
+    {
+      "algorithm": "TD-Insertion",
+      "duration": 61276.778,
+      "gap_pct": 8.471181333178066,
+      "runtime_seconds": 74.54
+    }
+  ]
+}

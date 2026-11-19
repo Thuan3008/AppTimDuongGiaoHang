@@ -1,0 +1,187 @@
+{
+  "complete_30_seeds": true,
+  "bks_recomputed": 21635.33990154579,
+  "bks_stored": 21635.339901545787,
+  "runs": [
+    {
+      "seed": 0,
+      "valid": true,
+      "duration_recomputed": 22064.400564307733,
+      "absolute_difference": 0.0
+    },
+    {
+      "seed": 1,
+      "valid": true,
+      "duration_recomputed": 22185.530844650377,
+      "absolute_difference": 0.0
+    },
+    {
+      "seed": 2,
+      "valid": true,
+      "duration_recomputed": 22128.706123134634,
+      "absolute_difference": 0.0
+    },
+    {
+      "seed": 3,
+      "valid": true,
+      "duration_recomputed": 22052.083300112492,
+      "absolute_difference": 0.0
+    },
+    {
+      "seed": 4,
+      "valid": true,
+      "duration_recomputed": 22026.78002170521,
+      "absolute_difference": 0.0
+    },
+    {
+      "seed": 5,
+      "valid": true,
+      "duration_recomputed": 22099.3907773966,
+      "absolute_difference": 0.0
+    },
+    {
+      "seed": 6,
+      "valid": true,
+      "duration_recomputed": 22524.760041594956,
+      "absolute_difference": 0.0
+    },
+    {
+      "seed": 7,
+      "valid": true,
+      "duration_recomputed": 21870.878550360365,
+      "absolute_difference": 0.0
+    },
+    {
+      "seed": 8,
+      "valid": true,
+      "duration_recomputed": 22696.21891002388,
+      "absolute_difference": 0.0
+    },
+    {
+      "seed": 9,
+      "valid": true,
+      "duration_recomputed": 22179.382479268726,
+      "absolute_difference": 0.0
+    },
+    {
+      "seed": 10,
+      "valid": true,
+      "duration_recomputed": 22298.73883095233,
+      "absolute_difference": 0.0
+    },
+    {
+      "seed": 11,
+      "valid": true,
+      "duration_recomputed": 21805.008639919994,
+      "absolute_difference": 0.0
+    },
+    {
+      "seed": 12,
+      "valid": true,
+      "duration_recomputed": 21995.426969492466,
+      "absolute_difference": 0.0
+    },
+    {
+      "seed": 13,
+      "valid": true,
+      "duration_recomputed": 22453.050370207166,
+      "absolute_difference": 0.0
+    },
+    {
+      "seed": 14,
+      "valid": true,
+      "duration_recomputed": 22263.121093312195,
+      "absolute_difference": 0.0
+    },
+    {
+      "seed": 15,
+      "valid": true,
+      "duration_recomputed": 22261.784634691136,
+      "absolute_difference": 0.0
+    },
+    {
+      "seed": 16,
+      "valid": true,
+      "duration_recomputed": 22048.503342045457,
+      "absolute_difference": 0.0
+    },
+    {
+      "seed": 17,
+      "valid": true,
+      "duration_recomputed": 22191.75858980786,
+      "absolute_difference": 0.0
+    },
+    {
+      "seed": 18,
+      "valid": true,
+      "duration_recomputed": 21664.784335418743,
+      "absolute_difference": 0.0
+    },
+    {
+      "seed": 19,
+      "valid": true,
+      "duration_recomputed": 22159.476040140806,
+      "absolute_difference": 0.0
+    },
+    {
+      "seed": 20,
+      "valid": true,
+      "duration_recomputed": 22485.882899166456,
+      "absolute_difference": 0.0
+    },
+    {
+      "seed": 21,
+      "valid": true,
+      "duration_recomputed": 22317.07065344171,
+      "absolute_difference": 0.0
+    },
+    {
+      "seed": 22,
+      "valid": true,
+      "duration_recomputed": 22449.85294966615,
+      "absolute_difference": 0.0
+    },
+    {
+      "seed": 23,
+      "valid": true,
+      "duration_recomputed": 22479.649974710585,
+      "absolute_difference": 0.0
+    },
+    {
+      "seed": 24,
+      "valid": true,
+      "duration_recomputed": 22353.61193090916,
+      "absolute_difference": 0.0
+    },
+    {
+      "seed": 25,
+      "valid": true,
+      "duration_recomputed": 22221.347014257226,
+      "absolute_difference": 0.0
+    },
+    {
+      "seed": 26,
+      "valid": true,
+      "duration_recomputed": 22219.83738187194,
+      "absolute_difference": 0.0
+    },
+    {
+      "seed": 27,
+      "valid": true,
+      "duration_recomputed": 22069.19610812259,
+      "absolute_difference": 0.0
+    },
+    {
+      "seed": 28,
+      "valid": true,
+      "duration_recomputed": 22052.740321671256,
+      "absolute_difference": 0.0
+    },
+    {
+      "seed": 29,
+      "valid": true,
+      "duration_recomputed": 22050.255670695333,
+      "absolute_difference": 0.0
+    }
+  ]
+}

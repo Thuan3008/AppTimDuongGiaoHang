@@ -1,0 +1,49 @@
+{
+  "dataset": "n50",
+  "merged_at": "2026-10-25T13:21:58",
+  "source_reports": [
+    "E:\\1KLCN\\tdvrp-rapo\\experiments\\rapo_contribution\\results\\n50\\nfe_580\\shards\\seeds_00_09\\stochastic_report.json",
+    "E:\\1KLCN\\tdvrp-rapo\\experiments\\rapo_contribution\\results\\n50\\nfe_580\\shards\\seeds_10_19\\stochastic_report.json",
+    "E:\\1KLCN\\tdvrp-rapo\\experiments\\rapo_contribution\\results\\n50\\nfe_580\\shards\\seeds_20_29\\stochastic_report.json"
+  ],
+  "seeds": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17,
+    18,
+    19,
+    20,
+    21,
+    22,
+    23,
+    24,
+    25,
+    26,
+    27,
+    28,
+    29
+  ],
+  "algorithms": [
+    "ARO-Original",
+    "POA-Original",
+    "RAPO-2709",
+    "GA",
+    "GA-LS"
+  ],
+  "run_count": 150
+}

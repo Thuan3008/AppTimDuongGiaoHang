@@ -1,0 +1,122 @@
+{
+  "instance_name": "hcmc-n10-heavy",
+  "benchmark_name": "HCMC-TDVRP",
+  "num_customers": 10,
+  "num_vehicles": 1,
+  "vehicle_capacity": 100.0,
+  "coordinates": [
+    [
+      10.791375,
+      106.653
+    ],
+    [
+      10.782625,
+      106.64895
+    ],
+    [
+      10.777625,
+      106.6368
+    ],
+    [
+      10.792625,
+      106.64895
+    ],
+    [
+      10.790125,
+      106.6773
+    ],
+    [
+      10.788875,
+      106.6746
+    ],
+    [
+      10.783875,
+      106.6692
+    ],
+    [
+      10.781375,
+      106.68
+    ],
+    [
+      10.781375,
+      106.63815
+    ],
+    [
+      10.801375,
+      106.6584
+    ],
+    [
+      10.777625,
+      106.6557
+    ]
+  ],
+  "demands": [
+    0.0,
+    1.0,
+    2.0,
+    4.0,
+    4.0,
+    9.0,
+    10.0,
+    1.0,
+    9.0,
+    4.0,
+    9.0
+  ],
+  "service_times": [
+    0.0,
+    180.0,
+    90.0,
+    180.0,
+    240.0,
+    120.0,
+    60.0,
+    90.0,
+    180.0,
+    120.0,
+    120.0
+  ],
+  "road_node_ids": [
+    1526,
+    1229,
+    1052,
+    1565,
+    1502,
+    1458,
+    1286,
+    1210,
+    1179,
+    1866,
+    1066
+  ],
+  "depot": 0,
+  "reference_lla": {
+    "lat": 10.792,
+    "lon": 106.653,
+    "alt": 0.0
+  },
+  "horizon": [
+    0.0,
+    86400.0
+  ],
+  "td": {
+    "model": "road-graph",
+    "graph": {
+      "path": "sidecars/hcmc.road.json"
+    },
+    "traffic": {
+      "path": "sidecars/hcmc.traffic-heavy.json"
+    },
+    "sample_step": 300.0
+  },
+  "metadata": {
+    "city": "ho_chi_minh",
+    "study_area": "tan_binh_tan_phu_phu_nhuan_q10_q11_q3",
+    "problem_type": "TDVRP",
+    "traffic_mode": "fixed",
+    "seed": 42,
+    "traffic_profile": "heavy",
+    "generated_at": "fixed-seed-generation",
+    "note": "Simulated fixed traffic; not real HCMC traffic."
+  }
+}

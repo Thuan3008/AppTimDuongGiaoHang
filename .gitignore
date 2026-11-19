@@ -1,0 +1,31 @@
+# Dependencies & Build
+node_modules/
+dist/
+build/
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.streamlit/secrets.toml
+.idea/
+.vscode/
+.DS_Store
+
+# Temporary review & scratch directories
+tmp/
+.tmp/
+.tmp_*/
+output/
+
+# Logs & Archives
+*.log
+*.rar
+*.zip
+
+# Temporary web map runtime files
+results/web_map/*.sqlite3
+results/web_map/*.json
+
+# Large binary raw map data
+data/hcmc/osm/*.osm.pbf
+data/hcmc/sidecars/hcmc.road-osm.json

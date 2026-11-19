@@ -1,0 +1,3 @@
+﻿algorithm,duration,gap_to_bks_percent,runtime_seconds,num_routes,feasible,termination,route_evaluation_requests,route_evaluations,cache_hits,capacity_rejections,domain_rejections,candidate_moves,accepted_moves
+TD-Insertion,23948.931283308335,11.769130014642283,5.210293099999944,4,True,all_customers_inserted,1804,1131,0,673,0,1779,25
+TD-Local-Search,22525.650450129433,5.126709999775314,30.003032100000382,4,True,time_limit_during_local_search,10795,4036,5005,1754,0,7038,29

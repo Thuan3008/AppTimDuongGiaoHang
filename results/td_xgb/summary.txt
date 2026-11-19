@@ -1,0 +1,7 @@
+Algorithm : TD-XGB (Gradient Boosted Trees)
+Instance  : poryos-hong_kong-n50-hyb-bpr-heavy
+Duration  : 61276.778 s
+BKS       : 56491.298 s
+Gap(%)    : 8.4712%
+Routes    : 4
+Runtime   : 74.54 s

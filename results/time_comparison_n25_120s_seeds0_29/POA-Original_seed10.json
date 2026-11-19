@@ -1,0 +1,105 @@
+{
+  "routes": [
+    [
+      4,
+      25,
+      13,
+      1,
+      2,
+      21
+    ],
+    [
+      15,
+      14,
+      3,
+      11,
+      12,
+      8,
+      22,
+      24
+    ],
+    [
+      16,
+      9,
+      20,
+      7,
+      6,
+      10,
+      5,
+      23,
+      17
+    ],
+    [
+      18,
+      19
+    ]
+  ],
+  "duration": 25317.99645615567,
+  "nfe": 163,
+  "history": [
+    {
+      "seconds": 0.6990832999981649,
+      "duration": 27194.693525064486,
+      "nfe": 1,
+      "completed_within_deadline": true
+    },
+    {
+      "seconds": 11.924346499999956,
+      "duration": 27004.79820614178,
+      "nfe": 15,
+      "completed_within_deadline": true
+    },
+    {
+      "seconds": 15.022561699999642,
+      "duration": 26645.727698347502,
+      "nfe": 20,
+      "completed_within_deadline": true
+    },
+    {
+      "seconds": 17.08333330000096,
+      "duration": 26394.7302262518,
+      "nfe": 22,
+      "completed_within_deadline": true
+    },
+    {
+      "seconds": 67.33095599999797,
+      "duration": 26328.450958013924,
+      "nfe": 92,
+      "completed_within_deadline": true
+    },
+    {
+      "seconds": 74.20801980000033,
+      "duration": 26244.450061762276,
+      "nfe": 100,
+      "completed_within_deadline": true
+    },
+    {
+      "seconds": 93.18481129999782,
+      "duration": 25317.99645615567,
+      "nfe": 126,
+      "completed_within_deadline": true
+    }
+  ],
+  "termination": "time_limit",
+  "search_runtime_seconds": 120.35381100000086,
+  "algorithm": "POA-Original",
+  "seed": 10,
+  "feasible": true,
+  "status": "completed",
+  "gap_to_bks_percent": 18.158526747729155,
+  "departure_times": [
+    82675.24611653565,
+    79247.23556645185,
+    76893.38985458796,
+    83610.24079159736
+  ],
+  "return_times": [
+    86605.77299998696,
+    86673.6288751727,
+    86993.37977637757,
+    87471.32713379127
+  ],
+  "validation_seconds": 0.0006377000026986934,
+  "best_duration_within_deadline": 25317.99645615567,
+  "time_limit_seconds": 120
+}

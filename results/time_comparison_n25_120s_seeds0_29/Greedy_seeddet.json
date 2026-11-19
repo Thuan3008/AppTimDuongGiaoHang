@@ -1,0 +1,198 @@
+{
+  "routes": [
+    [
+      2,
+      1,
+      8,
+      20,
+      3,
+      25,
+      10,
+      14
+    ],
+    [
+      11
+    ],
+    [
+      15,
+      6,
+      21,
+      9,
+      24,
+      22,
+      23,
+      17,
+      12,
+      13,
+      16,
+      4,
+      7,
+      5,
+      19
+    ],
+    [
+      18
+    ]
+  ],
+  "duration": 24968.209329982274,
+  "nfe": null,
+  "termination": "all_customers_assigned",
+  "history": [
+    {
+      "seconds": 0.012917000000015832,
+      "duration": 35357.97002356282,
+      "route_evaluations": 25,
+      "phase": "singleton_initialization"
+    },
+    {
+      "seconds": 0.029304200000296987,
+      "duration": 35021.00471989796,
+      "route_evaluations": 46,
+      "phase": "greedy"
+    },
+    {
+      "seconds": 0.05495310000060272,
+      "duration": 34581.989084043315,
+      "route_evaluations": 66,
+      "phase": "greedy"
+    },
+    {
+      "seconds": 0.08350419999987935,
+      "duration": 33927.73817540186,
+      "route_evaluations": 85,
+      "phase": "greedy"
+    },
+    {
+      "seconds": 0.12585779999972146,
+      "duration": 33098.73596047497,
+      "route_evaluations": 103,
+      "phase": "greedy"
+    },
+    {
+      "seconds": 0.1473587000000407,
+      "duration": 32415.1162894944,
+      "route_evaluations": 112,
+      "phase": "greedy"
+    },
+    {
+      "seconds": 0.1598973999998634,
+      "duration": 31769.226316182874,
+      "route_evaluations": 116,
+      "phase": "greedy"
+    },
+    {
+      "seconds": 0.1642373000004227,
+      "duration": 31036.052045226643,
+      "route_evaluations": 117,
+      "phase": "greedy"
+    },
+    {
+      "seconds": 0.1776002000005974,
+      "duration": 30632.65075089297,
+      "route_evaluations": 133,
+      "phase": "greedy"
+    },
+    {
+      "seconds": 0.1943533000003299,
+      "duration": 30238.994628092187,
+      "route_evaluations": 148,
+      "phase": "greedy"
+    },
+    {
+      "seconds": 0.21234150000054797,
+      "duration": 29953.833813770376,
+      "route_evaluations": 162,
+      "phase": "greedy"
+    },
+    {
+      "seconds": 0.2319236000003002,
+      "duration": 29711.70522881423,
+      "route_evaluations": 175,
+      "phase": "greedy"
+    },
+    {
+      "seconds": 0.2565575999997236,
+      "duration": 29233.85271190033,
+      "route_evaluations": 187,
+      "phase": "greedy"
+    },
+    {
+      "seconds": 0.2824282999999923,
+      "duration": 28623.564809760126,
+      "route_evaluations": 197,
+      "phase": "greedy"
+    },
+    {
+      "seconds": 0.3148370999997496,
+      "duration": 28018.57638568292,
+      "route_evaluations": 206,
+      "phase": "greedy"
+    },
+    {
+      "seconds": 0.35065709999980754,
+      "duration": 27900.914762692588,
+      "route_evaluations": 214,
+      "phase": "greedy"
+    },
+    {
+      "seconds": 0.39321800000016083,
+      "duration": 27498.352017823636,
+      "route_evaluations": 221,
+      "phase": "greedy"
+    },
+    {
+      "seconds": 0.4272622999997111,
+      "duration": 26788.11830944678,
+      "route_evaluations": 226,
+      "phase": "greedy"
+    },
+    {
+      "seconds": 0.4566805000004024,
+      "duration": 26051.16199149028,
+      "route_evaluations": 230,
+      "phase": "greedy"
+    },
+    {
+      "seconds": 0.4834811000000627,
+      "duration": 25426.438817858103,
+      "route_evaluations": 233,
+      "phase": "greedy"
+    },
+    {
+      "seconds": 0.5055430000002161,
+      "duration": 25078.625466241083,
+      "route_evaluations": 235,
+      "phase": "greedy"
+    },
+    {
+      "seconds": 0.5233634000005623,
+      "duration": 24968.209329982274,
+      "route_evaluations": 236,
+      "phase": "greedy"
+    }
+  ],
+  "statistics": {
+    "route_evaluations": 236
+  },
+  "search_runtime_seconds": 0.52343430000019,
+  "algorithm": "Greedy",
+  "seed": null,
+  "feasible": true,
+  "status": "completed",
+  "gap_to_bks_percent": 16.526078004182487,
+  "departure_times": [
+    0.0,
+    0.0,
+    0.0,
+    84934.52905037304
+  ],
+  "return_times": [
+    4321.6853617753295,
+    2129.2607146323303,
+    16328.931539061527,
+    87122.86076488612
+  ],
+  "validation_seconds": 0.0008821999999781838,
+  "best_duration_within_deadline": 24968.209329982274,
+  "time_limit_seconds": 120
+}

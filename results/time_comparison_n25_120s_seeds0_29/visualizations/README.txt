@@ -1,0 +1,3 @@
+Đủ 154 lượt hợp lệ. Có 3 lượt cải thiện sau hạn; hình và bảng chính dùng nghiệm hoàn tất trong 120 giây. Nhóm ngẫu nhiên: 30 seed; phương pháp tất định: 1 lượt, không tính SD giả. NFE không phải ngân sách dừng của đợt này. Thời gian nạp dữ liệu được loại khỏi đồng hồ tìm kiếm; xử lý cuối có thể làm runtime vượt hạn. Các phương pháp có phạm vi đo xử lý cuối khác nhau, không diễn giải chênh lệch nhỏ của runtime là ưu thế thuật toán.
+Nguồn: protocol.json và 154 JSON từng lượt. Không đọc checkpoint trùng hoặc tạo thêm số liệu.
+Tái tạo: .\.venv\Scripts\python.exe -m experiments.plot_time_comparison

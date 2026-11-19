@@ -1,0 +1,4 @@
+﻿variant,paired_seeds,full_wins,ties,variant_wins,mean_variant_minus_full_seconds
+ARO-only,20,20,0,0,1994.0198527933942
+POA-only,20,2,0,18,-230.32079555093605
+RAPO-no-AOS,20,3,12,5,-29.299225272864533

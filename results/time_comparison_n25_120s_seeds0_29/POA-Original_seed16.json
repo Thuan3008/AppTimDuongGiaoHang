@@ -1,0 +1,93 @@
+{
+  "routes": [
+    [
+      11,
+      10,
+      13,
+      7,
+      5,
+      6
+    ],
+    [
+      15,
+      17,
+      19,
+      22,
+      3,
+      25,
+      14,
+      21,
+      4,
+      20,
+      8,
+      16
+    ],
+    [
+      18,
+      9
+    ],
+    [
+      23,
+      24,
+      1,
+      2,
+      12
+    ]
+  ],
+  "duration": 25584.15558405234,
+  "nfe": 143,
+  "history": [
+    {
+      "seconds": 0.499990299998899,
+      "duration": 26365.637167240064,
+      "nfe": 1,
+      "completed_within_deadline": true
+    },
+    {
+      "seconds": 28.28385889999845,
+      "duration": 26018.53003564378,
+      "nfe": 38,
+      "completed_within_deadline": true
+    },
+    {
+      "seconds": 34.555309999999736,
+      "duration": 25727.79601396878,
+      "nfe": 47,
+      "completed_within_deadline": true
+    },
+    {
+      "seconds": 94.49903709999853,
+      "duration": 25688.436832047006,
+      "nfe": 111,
+      "completed_within_deadline": true
+    },
+    {
+      "seconds": 110.97620389999793,
+      "duration": 25584.15558405234,
+      "nfe": 131,
+      "completed_within_deadline": true
+    }
+  ],
+  "termination": "time_limit",
+  "search_runtime_seconds": 120.43250210000042,
+  "algorithm": "POA-Original",
+  "seed": 16,
+  "feasible": true,
+  "status": "completed",
+  "gap_to_bks_percent": 19.400685482018922,
+  "departure_times": [
+    78910.44580441112,
+    0.0,
+    83729.21233339733,
+    0.0
+  ],
+  "return_times": [
+    86649.85725678358,
+    11147.494653560694,
+    86690.80624681457,
+    3735.6555647019536
+  ],
+  "validation_seconds": 0.0005771999967691954,
+  "best_duration_within_deadline": 25584.15558405234,
+  "time_limit_seconds": 120
+}

@@ -1,0 +1,19 @@
+{
+  "algorithm": "RAPO-2709",
+  "runs_requested": 30,
+  "runs_completed": 30,
+  "runs_failed": 0,
+  "feasible_rate": 1.0,
+  "best": 21664.784335418743,
+  "mean": 22188.97431210185,
+  "median": 22182.45666195955,
+  "standard_deviation": 223.97566091254194,
+  "runtime_mean_seconds": 48.85855885000001,
+  "runtime_median_seconds": 46.76511070000106,
+  "runtime_standard_deviation": 6.526424196247447,
+  "best_gap_to_bks_percent": 0.13609415894063068,
+  "mean_gap_to_bks_percent": 2.5589355798219198,
+  "gap_standard_deviation_percentage_points": 1.0352306084941123,
+  "route_count_mean": 4.0,
+  "verified_30_seeds": true
+}

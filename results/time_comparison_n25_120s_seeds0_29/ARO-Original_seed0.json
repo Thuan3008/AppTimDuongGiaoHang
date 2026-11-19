@@ -1,0 +1,127 @@
+{
+  "routes": [
+    [
+      1,
+      11,
+      20,
+      21,
+      7,
+      3,
+      5,
+      8
+    ],
+    [
+      2,
+      4,
+      6
+    ],
+    [
+      16,
+      25
+    ],
+    [
+      17,
+      22,
+      23,
+      24
+    ],
+    [
+      18,
+      19,
+      9,
+      10,
+      12,
+      13,
+      14,
+      15
+    ]
+  ],
+  "duration": 24942.412655279575,
+  "nfe": 295,
+  "history": [
+    {
+      "seconds": 0.7273144999999204,
+      "duration": 27533.528584386237,
+      "nfe": 1,
+      "completed_within_deadline": true
+    },
+    {
+      "seconds": 1.9414586999992025,
+      "duration": 27196.8654694834,
+      "nfe": 3,
+      "completed_within_deadline": true
+    },
+    {
+      "seconds": 2.566166799999337,
+      "duration": 26211.846464752412,
+      "nfe": 4,
+      "completed_within_deadline": true
+    },
+    {
+      "seconds": 26.816607500000828,
+      "duration": 26209.178540566845,
+      "nfe": 49,
+      "completed_within_deadline": true
+    },
+    {
+      "seconds": 33.08942150000075,
+      "duration": 26074.43325179352,
+      "nfe": 62,
+      "completed_within_deadline": true
+    },
+    {
+      "seconds": 38.46727529999953,
+      "duration": 25874.28112622012,
+      "nfe": 73,
+      "completed_within_deadline": true
+    },
+    {
+      "seconds": 64.11065029999918,
+      "duration": 25701.396815794196,
+      "nfe": 119,
+      "completed_within_deadline": true
+    },
+    {
+      "seconds": 69.14153559999977,
+      "duration": 25163.57558772237,
+      "nfe": 129,
+      "completed_within_deadline": true
+    },
+    {
+      "seconds": 104.13023529999919,
+      "duration": 25041.485909915573,
+      "nfe": 239,
+      "completed_within_deadline": true
+    },
+    {
+      "seconds": 105.38769019999927,
+      "duration": 24942.412655279575,
+      "nfe": 244,
+      "completed_within_deadline": true
+    }
+  ],
+  "termination": "time_limit",
+  "search_runtime_seconds": 120.30347090000032,
+  "algorithm": "ARO-Original",
+  "seed": 0,
+  "feasible": true,
+  "status": "completed",
+  "gap_to_bks_percent": 16.405685496697142,
+  "departure_times": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    77287.4354278551
+  ],
+  "return_times": [
+    7633.010475234737,
+    2356.277112342229,
+    1958.0568836099458,
+    3643.946961322909,
+    86638.55665062486
+  ],
+  "validation_seconds": 0.0006841999984317226,
+  "best_duration_within_deadline": 24942.412655279575,
+  "time_limit_seconds": 120
+}

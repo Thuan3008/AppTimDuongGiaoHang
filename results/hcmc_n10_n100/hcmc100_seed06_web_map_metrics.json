@@ -1,0 +1,22 @@
+{
+  "source_file": "f8d2d2d6bf0045198b650eb0c5180102.json",
+  "algorithm": "HCMC-TD-ERAPO",
+  "config": {
+    "dataset": "hcmc100",
+    "population_size": 10,
+    "budget": 290,
+    "seed": 6,
+    "num_seeds": 1,
+    "earliest_departure": 28800
+  },
+  "result": {
+    "seed": 6,
+    "fitness": 23918.615900183235,
+    "feasible": true,
+    "nfe": 290,
+    "runtime_seconds": 19.833575399999972,
+    "departure_time_mode": "exact_ndcpwlf",
+    "total_route_duration": 23918.615900183235,
+    "route_count": 6
+  }
+}
