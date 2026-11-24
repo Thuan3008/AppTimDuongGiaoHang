@@ -56,6 +56,7 @@ interface DispatchSidebarProps {
   manualMode: boolean
   manualVehicles: string
   manualCapacity: string
+  manualServiceMinutes: string
   depot: DepotDraft
   customPoints: CustomPointDraft[]
   pendingPick: MapPickTarget | null
@@ -77,6 +78,7 @@ interface DispatchSidebarProps {
   onManualModeChange: (enabled: boolean) => void
   onManualVehiclesChange: (value: string) => void
   onManualCapacityChange: (value: string) => void
+  onManualServiceMinutesChange: (value: string) => void
   onDepotChange: (patch: Partial<DepotDraft>) => void
   onDepotAddressInput: (address: string) => void
   onDepotCoordInput: (field: "lat" | "lon", value: string) => void
@@ -131,6 +133,7 @@ export function DispatchSidebar({
   manualMode,
   manualVehicles,
   manualCapacity,
+  manualServiceMinutes,
   depot,
   customPoints,
   pendingPick,
@@ -152,6 +155,7 @@ export function DispatchSidebar({
   onManualModeChange,
   onManualVehiclesChange,
   onManualCapacityChange,
+  onManualServiceMinutesChange,
   onDepotChange,
   onDepotAddressInput,
   onDepotCoordInput,
@@ -294,11 +298,13 @@ export function DispatchSidebar({
                   disabled={busy}
                   manualVehicles={manualVehicles}
                   manualCapacity={manualCapacity}
+                  manualServiceMinutes={manualServiceMinutes}
                   depot={depot}
                   points={customPoints}
                   pendingPick={pendingPick}
                   onVehiclesChange={onManualVehiclesChange}
                   onCapacityChange={onManualCapacityChange}
+                  onServiceMinutesChange={onManualServiceMinutesChange}
                   onDepotChange={onDepotChange}
                   onDepotAddressInput={onDepotAddressInput}
                   onDepotCoordInput={onDepotCoordInput}

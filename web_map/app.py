@@ -139,6 +139,7 @@ HCMC_ROAD_CLASS_WEIGHTS = {
 }
 SNAP_AUTO_MAX_M = 100.0
 SNAP_CONFIRM_MAX_M = 300.0
+HCMC_BBOX = (106.35, 10.35, 107.05, 11.20)
 NODE_INDEXES = {}
 
 
@@ -344,7 +345,7 @@ def _snap_policy(distance_m):
 class RoadNodeIndex:
     """Small dependency-free spatial grid for nearest-road-node queries."""
 
-    cell_size = 0.01
+    cell_size = 0.0025
 
     def __init__(self, nodes):
         self.nodes = nodes
@@ -361,7 +362,7 @@ class RoadNodeIndex:
         center_y, center_x = self._cell(lat, lon)
         best_node = None
         best_distance = math.inf
-        for radius in range(101):
+        for radius in range(401):
             for cell_y in range(center_y - radius, center_y + radius + 1):
                 for cell_x in range(center_x - radius, center_x + radius + 1):
                     if radius and (abs(cell_y - center_y) != radius
@@ -400,78 +401,163 @@ def _road_node_index(nodes):
     return cached[1]
 
 
-@lru_cache(maxsize=512)
-def geocode_address(address):
-    """Resolve one explicitly submitted address, with two OSM providers."""
-    global GEOCODE_LAST_REQUEST
-    query = address.strip()
-    if not query:
-        raise ValueError('Địa chỉ không được để trống')
-    if len(query) > 300:
-        raise ValueError('Địa chỉ dài quá 300 ký tự')
+_VI_ADDRESS_ABBREVS = (
+    (re.compile(r'(?i)^\s*(?:số\s+nhà|số|so\s+nha|so)\s+(?=\d)'), ''),
+    (re.compile(r'(?i)\b(?:q\.?\s*|quận\s+)(1[0-2]|[1-9])\b'), r'Quận \1'),
+    (re.compile(r'(?i)\bq\.\s*(?=[A-Za-zÀ-ỹĐđ])'), 'Quận '),
+    (
+        re.compile(
+            r'(?i)\b(?:p\.?\s*|phường\s+)(2[0-8]|1\d|[1-9])'
+            r'(?=\s*(?:,|$|\b(?:q\.?|quận|huyện|tp\.?|hồ|thành)))'
+        ),
+        r'Phường \1',
+    ),
+    (re.compile(r'(?i)\bp\.\s*(?=[A-Za-zÀ-ỹĐđ])'), 'Phường '),
+    (re.compile(r'(?i)\btp\.?\s*thủ\s*đức\b'), 'Thành phố Thủ Đức'),
+    (re.compile(r'(?i)\b(?:tp\.?\s*hcm|tphcm|tp\.?\s*hồ\s*chí\s*minh)\b'), 'Thành phố Hồ Chí Minh'),
+    (re.compile(r'(?i)\bcmt8\b'), 'Cách Mạng Tháng Tám'),
+    (re.compile(r'(?i)\bntmk\b'), 'Nguyễn Thị Minh Khai'),
+    (re.compile(r'(?i)\bnkkn\b'), 'Nam Kỳ Khởi Nghĩa'),
+    (re.compile(r'(?i)\bnvl\b'), 'Nguyễn Văn Linh'),
+    (re.compile(r'(?i)\b(?:đbp|dbp)\b'), 'Điện Biên Phủ'),
+    (re.compile(r'(?i)\bql\s*(\d+[a-z]?)\b'), r'Quốc lộ \1'),
+    (re.compile(r'(?i)\btl\s*(\d+[a-z]?)\b'), r'Tỉnh lộ \1'),
+)
+
+
+def _expand_vietnamese_address(address):
+    text = str(address).strip()
+    for pattern, replacement in _VI_ADDRESS_ABBREVS:
+        text = pattern.sub(replacement, text)
+    return re.sub(r'\s+', ' ', text).strip()
+
+
+def _append_hcmc_suffix(query):
     lowered = query.casefold()
     if 'hồ chí minh' not in lowered and 'ho chi minh' not in lowered and 'tp.hcm' not in lowered:
-        query += ', Thành phố Hồ Chí Minh, Việt Nam'
+        return query + ', Thành phố Hồ Chí Minh, Việt Nam'
+    return query
+
+
+def _fetch_geocode_provider(provider, url, provider_order, fallback_display, headers):
+    global GEOCODE_LAST_REQUEST
+    if provider == 'Nominatim':
+        # Nominatim yêu cầu tối đa 1 request/giây; Photon là host khác nên không cần sleep chéo.
+        with GEOCODE_LOCK:
+            time.sleep(max(0, 1.05 - (time.monotonic() - GEOCODE_LAST_REQUEST)))
+            GEOCODE_LAST_REQUEST = time.monotonic()
+            with urlopen(Request(url, headers=headers), timeout=10) as response:
+                payload = json.load(response)
+    else:
+        with urlopen(Request(url, headers=headers), timeout=10) as response:
+            payload = json.load(response)
+
+    results = []
+    if provider == 'Photon':
+        for source_rank, item in enumerate(payload.get('features', []) if isinstance(payload, dict) else []):
+            coordinates = item.get('geometry', {}).get('coordinates', [])
+            if len(coordinates) < 2:
+                continue
+            properties = item.get('properties', {})
+            address_parts = [properties.get(key) for key in (
+                'name', 'housenumber', 'street', 'district', 'city', 'country')]
+            display_name = ', '.join(dict.fromkeys(str(part) for part in address_parts if part))
+            try:
+                lon, lat = map(float, coordinates[:2])
+            except (TypeError, ValueError):
+                continue
+            if math.isfinite(lat) and math.isfinite(lon):
+                results.append(dict(
+                    lat=lat, lon=lon, display_name=display_name or fallback_display,
+                    provider=provider, provider_order=provider_order, source_rank=source_rank,
+                    house_number=str(properties.get('housenumber') or '').strip(),
+                ))
+    else:
+        for source_rank, item in enumerate(payload if isinstance(payload, list) else []):
+            try:
+                lat, lon = float(item['lat']), float(item['lon'])
+            except (KeyError, TypeError, ValueError):
+                continue
+            if math.isfinite(lat) and math.isfinite(lon):
+                address_fields = item.get('address', {}) if isinstance(item.get('address'), dict) else {}
+                results.append(dict(
+                    lat=lat, lon=lon,
+                    display_name=str(item.get('display_name') or fallback_display), provider=provider,
+                    provider_order=provider_order, source_rank=source_rank,
+                    house_number=str(address_fields.get('house_number') or '').strip(),
+                ))
+    return results
+
+
+def _is_high_confidence_hit(original_query, candidates):
+    query_house = _query_house_number(original_query)
+    for candidate in candidates:
+        score, house_match = _score_geocode_candidate(original_query, candidate)
+        if query_house:
+            if house_match == 'exact' and score >= 180.0:
+                return True
+        elif score >= 75.0:
+            return True
+    return False
+
+
+@lru_cache(maxsize=512)
+def geocode_address(address):
+    """Resolve one explicitly submitted address, with HCMC bbox and Vietnamese expansion."""
+    raw_query = address.strip()
+    if not raw_query:
+        raise ValueError('Địa chỉ không được để trống')
+    if len(raw_query) > 300:
+        raise ValueError('Địa chỉ dài quá 300 ký tự')
+    expanded_query = _expand_vietnamese_address(raw_query)
+    search_query = _append_hcmc_suffix(expanded_query)
     request_headers = {'User-Agent': 'TDVRP-RAPO-Research/1.0 (local academic delivery-routing app)'}
-    provider_requests = [
-        ('Photon', 'https://photon.komoot.io/api/?' + urlencode({
-            'q': query, 'limit': 5, 'lat': 10.79, 'lon': 106.65,
-        })),
-        ('Nominatim', 'https://nominatim.openstreetmap.org/search?' + urlencode({
-            'q': query, 'format': 'jsonv2', 'limit': 5, 'countrycodes': 'vn',
-            'addressdetails': 1, 'accept-language': 'vi',
-        })),
-    ]
+    min_lon, min_lat, max_lon, max_lat = HCMC_BBOX
+
+    def build_provider_urls(q_text):
+        return [
+            ('Photon', 'https://photon.komoot.io/api/?' + urlencode({
+                'q': q_text, 'limit': 8, 'lat': 10.79, 'lon': 106.65,
+                'bbox': f'{min_lon},{min_lat},{max_lon},{max_lat}',
+            })),
+            ('Nominatim', 'https://nominatim.openstreetmap.org/search?' + urlencode({
+                'q': q_text, 'format': 'jsonv2', 'limit': 8, 'countrycodes': 'vn',
+                'viewbox': f'{min_lon},{max_lat},{max_lon},{min_lat}', 'bounded': 1,
+                'addressdetails': 1, 'accept-language': 'vi',
+            })),
+        ]
+
+    provider_requests = build_provider_urls(search_query)
     failures = []
     combined = []
+    network_errors = 0
     for provider_order, (provider, url) in enumerate(provider_requests):
         try:
-            with GEOCODE_LOCK:
-                time.sleep(max(0, 1.05 - (time.monotonic() - GEOCODE_LAST_REQUEST)))
-                GEOCODE_LAST_REQUEST = time.monotonic()
-                with urlopen(Request(url, headers=request_headers), timeout=15) as response:
-                    payload = json.load(response)
+            results = _fetch_geocode_provider(provider, url, provider_order, search_query, request_headers)
         except Exception as error:
+            network_errors += 1
             failures.append(f'{provider}: {error}')
             continue
-        results = []
-        if provider == 'Photon':
-            for source_rank, item in enumerate(payload.get('features', []) if isinstance(payload, dict) else []):
-                coordinates = item.get('geometry', {}).get('coordinates', [])
-                if len(coordinates) < 2:
-                    continue
-                properties = item.get('properties', {})
-                address_parts = [properties.get(key) for key in (
-                    'name', 'housenumber', 'street', 'district', 'city', 'country')]
-                display_name = ', '.join(dict.fromkeys(str(part) for part in address_parts if part))
-                try:
-                    lon, lat = map(float, coordinates[:2])
-                except (TypeError, ValueError):
-                    continue
-                if math.isfinite(lat) and math.isfinite(lon):
-                    results.append(dict(
-                        lat=lat, lon=lon, display_name=display_name or query,
-                        provider=provider, provider_order=provider_order, source_rank=source_rank,
-                        house_number=str(properties.get('housenumber') or '').strip(),
-                    ))
-        else:
-            for source_rank, item in enumerate(payload if isinstance(payload, list) else []):
-                try:
-                    lat, lon = float(item['lat']), float(item['lon'])
-                except (KeyError, TypeError, ValueError):
-                    continue
-                if math.isfinite(lat) and math.isfinite(lon):
-                    address_fields = item.get('address', {}) if isinstance(item.get('address'), dict) else {}
-                    results.append(dict(
-                        lat=lat, lon=lon,
-                        display_name=str(item.get('display_name') or query), provider=provider,
-                        provider_order=provider_order, source_rank=source_rank,
-                        house_number=str(address_fields.get('house_number') or '').strip(),
-                    ))
         if results:
             combined.extend(results)
+            if provider == 'Photon' and _is_high_confidence_hit(raw_query, results):
+                # Photon đã tìm đúng số nhà và tên đường trong khung TP.HCM, bỏ qua Nominatim để trả về tức thì.
+                break
         else:
             failures.append(f'{provider}: không có kết quả')
+
+    # Nếu không tìm thấy do số hẻm sâu chưa đánh dấu trên OSM, fallback nhẹ sang tên đường
+    query_house = _query_house_number(raw_query)
+    if not combined and query_house and network_errors < len(provider_requests):
+        street_only = re.sub(r'^\s*\d+[a-zA-Z]?(?:\s*/\s*\d+[a-zA-Z]?)*[\s,]+', '', expanded_query).strip()
+        if street_only and street_only != expanded_query:
+            street_query = _append_hcmc_suffix(street_only)
+            try:
+                fallback_url = build_provider_urls(street_query)[0][1]
+                combined.extend(_fetch_geocode_provider('Photon', fallback_url, 0, street_query, request_headers))
+            except Exception:
+                pass
+
     if combined:
         unique = []
         seen = set()
@@ -487,7 +573,7 @@ def geocode_address(address):
 
 ADDRESS_STOP_WORDS = {
     'duong', 'phuong', 'quan', 'huyen', 'xa', 'thi', 'tran', 'thanh', 'pho',
-    'ho', 'chi', 'minh', 'viet', 'nam', 'tp', 'hcm',
+    'ho', 'chi', 'minh', 'viet', 'nam', 'tp', 'hcm', 'so',
 }
 
 
@@ -499,14 +585,26 @@ def _normalize_address_text(value):
 
 def _query_house_number(address):
     normalized = _normalize_address_text(address)
-    match = re.match(r'^(\d+(?:\s*/\s*\d+)*)\b', normalized)
+    match = re.match(r'^(?:so(?:\s+nha)?\s+)?(\d+[a-z]?(?:\s*/\s*\d+[a-z]?)*)\b', normalized)
     return re.sub(r'\s+', '', match.group(1)) if match else ''
 
 
+def _house_root(house_number):
+    match = re.match(r'^(\d+)', str(house_number))
+    return match.group(1) if match else ''
+
+
 def _address_tokens(value):
+    expanded = _expand_vietnamese_address(value)
+    normalized = _normalize_address_text(expanded)
+    normalized = re.sub(r'\b(quan|phuong)\s+(\d+[a-z]?)\b', r'\1_\2', normalized)
+    normalized = re.sub(r'\bthang\s+(?:tam|8)\b', 'thang_8', normalized)
     return {
-        token for token in _normalize_address_text(value).split()
-        if len(token) > 1 and not token.isdigit() and token not in ADDRESS_STOP_WORDS
+        token for token in normalized.split()
+        if len(token) > 1
+        and not token.isdigit()
+        and not re.fullmatch(r'\d+[a-z]?(?:/\d+[a-z]?)*', token)
+        and token not in ADDRESS_STOP_WORDS
     }
 
 
@@ -525,8 +623,16 @@ def _score_geocode_candidate(query, candidate):
             score += 140.0
             house_match = 'exact'
         elif candidate_house:
-            score -= 60.0
-            house_match = 'wrong'
+            if (
+                _house_root(query_house)
+                and _house_root(query_house) == _house_root(candidate_house)
+                and overlap >= 0.5
+            ):
+                score += 65.0
+                house_match = 'prefix'
+            else:
+                score -= 60.0
+                house_match = 'wrong'
         else:
             score -= 45.0
             house_match = 'missing'

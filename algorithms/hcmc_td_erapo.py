@@ -45,9 +45,11 @@ from core.data.evaluator import (
 from core.data.load_instance import load_instance
 from core.data.load_road_graph import load_road_graph
 from core.data.load_traffic import load_traffic
-from core.data.models import RoadEdge, RoadNode, TDVRPInstance, TrafficOverlay
+from core.data.models import ProceduralTrafficOverlay, RoadEdge, RoadNode, TDVRPInstance, TrafficOverlay
 from core.data.solution import repair_solution
 from core.models import Solution
+from core.routing.fastest_path import prepare_adjacency
+from core.routing.travel_time import get_edge_travel_time
 
 
 ELITE_OPERATORS = ("relocate", "swap", "two_opt", "two_opt_star")
@@ -61,6 +63,40 @@ _MEM_ATF_CACHE: OrderedDict[
 ] = OrderedDict()
 _MEM_CACHE_LOCK = Lock()
 _MEM_CACHE_MAXSIZE = 8
+_COMPACT_GRAPH_CACHE: OrderedDict[tuple[int, int, int, int, int], "_CompactGraphData"] = OrderedDict()
+_COMPACT_GRAPH_CACHE_LOCK = Lock()
+_COMPACT_GRAPH_CACHE_MAXSIZE = 4
+
+
+@dataclass
+class _CompactGraphData:
+    nodes_ref: dict[int, RoadNode]
+    edges_ref: dict[str, RoadEdge]
+    traffic_ref: Any
+    node_ids: tuple[int, ...]
+    node_to_idx: dict[int, int]
+    num_v: int
+    bin_edges: tuple[float, ...]
+    num_bins: int
+    cycle_start: float
+    cycle_end: float
+    cycle: float
+    uniform_bin_width: float | None
+    adj: list[list[tuple[int, float, float, list[float], list[float]]]]
+    compact_edges: list[tuple[int, int, float, float, list[float], list[float], bool]]
+    transitions: tuple[float, ...]
+    worst_slowdown: float
+    bin_max_alpha: tuple[float, ...] | None = None
+    core_v: int = 0
+    orig_to_core: list[int] | None = None
+    core_adj: list[list[tuple[int, float, float, list[float], list[float]]]] | None = None
+    peeled: list[bool] | None = None
+    peel_parent: list[int] | None = None
+    node_to_chain: list[int] | None = None
+    chains: list[tuple[int, int, tuple[int, ...], Any, Any]] | None = None
+    chain_shortcuts: list[tuple[int, int, Any, Any]] | None = None
+    pinned_adj: list[list[tuple[int, float, float, int]]] | None = None
+    directed_edge_data: list[tuple[int, int, float, list[float]]] | None = None
 
 
 @dataclass(frozen=True)
@@ -194,6 +230,8 @@ class _HCMCATFProvider:
         sample_step: float | None = None,
         simplify_tolerance: float = 1.0,
         routing_policy: str | None = None,
+        earliest_departure: float = 0.0,
+        latest_departure: float | None = None,
     ) -> None:
         self.instance = instance
         self.graph = graph
@@ -206,6 +244,10 @@ class _HCMCATFProvider:
         self.horizon = (float(instance.horizon[0]), float(instance.horizon[1]))
         self.step = float(sample_step or instance.sample_step or 300.0)
         self.simplify_tolerance = float(simplify_tolerance)
+        self.earliest_departure = float(earliest_departure)
+        self.latest_departure = (
+            float(latest_departure) if latest_departure is not None else None
+        )
 
         self._external_atfs = instance.arrival_time_functions
         self._atfs_by_source: dict[int, dict[int, NDCPWLF]] = {}
@@ -214,13 +256,26 @@ class _HCMCATFProvider:
             self.atf_source = "instance_atfs"
             self.t0_matrix: list[list[float]] | None = None
             self.ff_matrix: list[list[float]] | None = None
+            self._active_end: float | None = None
             return
 
         self.atf_source = f"hcmc_{self.routing_policy}"
         self._init_compact_graph()
-        self._build_grid()
-        self.t0_matrix = self._compute_scalar_matrix(departure=self._reference_zero_time())
+        self._instantiate_run_graph()
+        self._tree_cache: dict[tuple[int, float], dict[int, float]] = {}
+
+        ref_zero = self._reference_zero_time()
+        self.t0_matrix = self._compute_scalar_matrix(departure=ref_zero)
         self.ff_matrix = self._compute_free_flow_matrix()
+
+        # Xác định giới hạn trên an toàn cho các cung khi biết latest_departure
+        if self.latest_departure is not None:
+            end_h = min(self.horizon[1], self.latest_departure)
+            self._active_end = self._estimate_active_end(end_h)
+        else:
+            self._active_end = None
+
+        self._build_grid()
 
         # Nếu max hành trình vượt quá cửa sổ tìm trước mặc định, mở rộng lookback và dựng lại lưới.
         max_tt = max(
@@ -236,12 +291,183 @@ class _HCMCATFProvider:
             return 0.0
         return self.horizon[0]
 
+    def _bin_alpha_at(self, t: float) -> float:
+        if self._bin_max_alpha is None:
+            return self._worst_slowdown
+        rel = (t - self._cycle_start) % self._cycle
+        if self._uniform_bin_width is not None:
+            slot = min(int(rel // self._uniform_bin_width), self._num_bins - 1)
+        else:
+            slot = min(bisect_right(self._bin_edges, self._cycle_start + rel) - 1, self._num_bins - 1)
+        return self._bin_max_alpha[max(0, slot)]
+
+    def _max_single_route_travel(self, matrix: list[list[float]], k_fit: int) -> float:
+        n = self.instance.num_customers
+        depot = self.instance.depot
+        if n <= 0 or k_fit <= 0:
+            return 0.0
+        if n <= 8:
+            cap = self.instance.vehicle_capacity + 1e-9
+            demands = self.instance.demands
+            full = 1 << n
+            # dp[(mask << 4) | last_idx] lưu chi phí đường đi dài nhất từ depot tới last (0-based 0..n-1)
+            dp = [-1.0] * (full * n)
+            mask_load = [0.0] * full
+            for mask in range(1, full):
+                lsb = mask & -mask
+                bit = lsb.bit_length() - 1
+                mask_load[mask] = mask_load[mask ^ lsb] + float(demands[bit + 1])
+                if mask == lsb:
+                    if mask_load[mask] <= cap:
+                        dp[(mask * n) + bit] = matrix[depot][bit + 1]
+                    continue
+                if mask_load[mask] > cap:
+                    continue
+                tmp = mask
+                while tmp:
+                    lb = tmp & -tmp
+                    last = lb.bit_length() - 1
+                    prev_mask = mask ^ lb
+                    best_val = -1.0
+                    tmp_p = prev_mask
+                    base_prev = prev_mask * n
+                    c_last = last + 1
+                    while tmp_p:
+                        pb = tmp_p & -tmp_p
+                        prev_i = pb.bit_length() - 1
+                        pv = dp[base_prev + prev_i]
+                        if pv >= 0.0:
+                            cand = pv + matrix[prev_i + 1][c_last]
+                            if cand > best_val:
+                                best_val = cand
+                        tmp_p ^= pb
+                    dp[(mask * n) + last] = best_val
+                    tmp ^= lb
+            best_cycle = 0.0
+            for mask in range(1, full):
+                if mask_load[mask] > cap:
+                    continue
+                base_m = mask * n
+                for last in range(n):
+                    val = dp[base_m + last]
+                    if val >= 0.0:
+                        cand = val + matrix[last + 1][depot]
+                        if cand > best_cycle:
+                            best_cycle = cand
+            return best_cycle
+
+        max_depot_out = max((matrix[depot][c] for c in range(self.num_nodes) if c != depot), default=0.0)
+        row_maxes = sorted(
+            (
+                max((matrix[i][j] for j in range(self.num_nodes) if j != i), default=0.0)
+                for i in range(self.num_nodes)
+                if i != depot
+            ),
+            reverse=True,
+        )
+        return max_depot_out + sum(row_maxes[:k_fit])
+
+    def _estimate_active_end(self, end_h: float) -> float:
+        cap = self.instance.vehicle_capacity + 1e-9
+        demands = sorted(float(self.instance.demands[c]) for c in range(1, self.num_nodes))
+        acc_d = 0.0
+        k_fit = 0
+        for d in demands:
+            if acc_d + d <= cap:
+                acc_d += d
+                k_fit += 1
+            else:
+                break
+        k_fit = max(1, min(self.instance.num_customers, k_fit))
+        service_bound = sum(
+            sorted((float(self.instance.service_times[c]) for c in range(1, self.num_nodes)), reverse=True)[:k_fit]
+        )
+
+        if self._bin_max_alpha is None:
+            assert self.ff_matrix is not None
+            max_tour_ff = self._max_single_route_travel(self.ff_matrix, k_fit)
+            span_bound = max_tour_ff * self._worst_slowdown + service_bound + 3600.0
+            active_end = min(self.horizon[1], end_h + span_bound)
+            if self.instance.time_windows is not None:
+                max_ready = max(
+                    (min(self.horizon[1], float(w[0])) for w in self.instance.time_windows if w),
+                    default=self.earliest_departure,
+                )
+                active_end = min(self.horizon[1], max(active_end, max_ready + span_bound))
+            return max(self.earliest_departure, active_end)
+
+        # Tính ma trận thời gian thực tại end_h (được cache lại để tái sử dụng cho _grid)
+        end_matrix = self._compute_scalar_matrix(departure=end_h)
+        max_tour_end = self._max_single_route_travel(end_matrix, k_fit)
+        # Bù biên độ biến thiên cục bộ của observed_way_speeds + service của một tuyến
+        rem_work = max_tour_end * 1.25 + service_bound
+
+        def _propagate_from(start_t: float, work: float) -> float:
+            cur_t = min(self.horizon[1], start_t)
+            rem = work
+            min_alpha = self._bin_alpha_at(cur_t)
+            guard = 0
+            while rem > 1e-6 and cur_t < self.horizon[1] - 1e-9 and guard < self._num_bins * 4:
+                guard += 1
+                rel = (cur_t - self._cycle_start) % self._cycle
+                if self._uniform_bin_width is not None:
+                    slot = min(int(rel // self._uniform_bin_width), self._num_bins - 1)
+                else:
+                    slot = min(bisect_right(self._bin_edges, self._cycle_start + rel) - 1, self._num_bins - 1)
+                to_b = self._bin_edges[slot + 1] - (self._cycle_start + rel)
+                if to_b <= 1e-9:
+                    to_b = self._cycle
+                b_end = min(self.horizon[1], cur_t + to_b)
+                a_bin = self._bin_max_alpha[slot] if self._bin_max_alpha is not None else self._worst_slowdown
+                if a_bin < min_alpha:
+                    min_alpha = a_bin
+                scale = max(1.0, a_bin / max(min_alpha, 1e-6))
+                avail = b_end - cur_t
+                if rem * scale <= avail + 1e-9:
+                    cur_t += rem * scale
+                    rem = 0.0
+                    break
+                rem -= avail / scale
+                cur_t = b_end
+            return min(self.horizon[1], cur_t + 1800.0)
+
+        active_end = _propagate_from(end_h, rem_work)
+        if self.instance.time_windows is not None:
+            max_ready = max(
+                (min(self.horizon[1], float(w[0])) for w in self.instance.time_windows if w),
+                default=self.earliest_departure,
+            )
+            if max_ready > end_h:
+                assert self.ff_matrix is not None
+                ff_span = self._max_single_route_travel(self.ff_matrix, k_fit) * self._worst_slowdown + service_bound + 1800.0
+                active_end = min(self.horizon[1], max(active_end, max_ready + ff_span))
+        return max(self.earliest_departure, active_end)
+
     def _init_compact_graph(self) -> None:
-        node_ids = sorted(self.nodes.keys())
-        self._node_to_idx = {nid: idx for idx, nid in enumerate(node_ids)}
-        self._num_v = len(node_ids)
-        self._cust_v = [self._node_to_idx[nid] for nid in self.instance.road_node_ids]
-        self._target_v_set = set(self._cust_v)
+        cache_key = (
+            id(self.nodes),
+            len(self.nodes),
+            id(self.edges),
+            len(self.edges),
+            id(self.traffic),
+        )
+        use_cache = len(self.nodes) >= 1_000
+        if use_cache:
+            with _COMPACT_GRAPH_CACHE_LOCK:
+                cached = _COMPACT_GRAPH_CACHE.get(cache_key)
+                if (
+                    cached is not None
+                    and cached.nodes_ref is self.nodes
+                    and cached.edges_ref is self.edges
+                    and cached.traffic_ref is self.traffic
+                ):
+                    _COMPACT_GRAPH_CACHE.move_to_end(cache_key)
+                    self._apply_compact_data(cached)
+                    return
+
+        node_ids = tuple(sorted(self.nodes.keys()))
+        node_to_idx = {nid: idx for idx, nid in enumerate(node_ids)}
+        num_v = len(node_ids)
 
         bin_edges = tuple(
             float(x)
@@ -249,116 +475,511 @@ class _HCMCATFProvider:
         )
         if len(bin_edges) < 2:
             raise ValueError("Traffic overlay cần ít nhất một bin thời gian")
-        self._bin_edges = bin_edges
-        self._num_bins = len(bin_edges) - 1
-        self._cycle_start = bin_edges[0]
-        self._cycle_end = bin_edges[-1]
-        self._cycle = self._cycle_end - self._cycle_start
+        num_bins = len(bin_edges) - 1
+        cycle_start = bin_edges[0]
+        cycle_end = bin_edges[-1]
+        cycle = cycle_end - cycle_start
 
-        widths = [bin_edges[k + 1] - bin_edges[k] for k in range(self._num_bins)]
-        self._uniform_bin_width: float | None = (
+        widths = [bin_edges[k + 1] - bin_edges[k] for k in range(num_bins)]
+        uniform_bin_width: float | None = (
             widths[0]
             if all(abs(w - widths[0]) <= 1e-9 for w in widths) and widths[0] > 0
             else None
         )
 
         adj: list[list[tuple[int, float, float, list[float], list[float]]]] = [
-            [] for _ in range(self._num_v)
+            [] for _ in range(num_v)
         ]
-        # Lưu edge list riêng nếu dùng pinned_free_flow_paths với Edge ATF
-        self._compact_edges: list[tuple[int, int, float, float, list[float], list[float]]] = []
-        has_speed_for = hasattr(self.traffic, "speed_for")
-        traffic_edges = getattr(self.traffic, "edges", None)
+        compact_edges: list[tuple[int, int, float, float, list[float], list[float], bool]] = []
+        worst_slowdown = 1.0
+        bin_max_alpha: tuple[float, ...] | None = None
 
-        for edge in self.edges.values():
-            u = self._node_to_idx[edge.from_node]
-            v = self._node_to_idx[edge.to_node]
-            dist = float(edge.distance_m)
-            ff_speed = float(edge.free_flow_speed_kmh) / 3.6
-            if has_speed_for:
-                speeds_mps = [
-                    max(1e-6, float(self.traffic.speed_for(edge, s)) / 3.6)
-                    for s in range(self._num_bins)
-                ]
-            else:
-                prof = (
-                    traffic_edges[edge.id]
-                    if traffic_edges is not None
-                    else self.traffic[edge.id]
-                )
-                speeds_mps = [
-                    max(1e-6, float(prof.hourly_speed_kmh[f"{s:02d}"]) / 3.6)
-                    for s in range(self._num_bins)
-                ]
-            inv_speeds = [1.0 / s for s in speeds_mps]
-            entry_idx = len(self._compact_edges)
-            self._compact_edges.append((u, v, dist, ff_speed, speeds_mps, inv_speeds))
-            adj[u].append((v, dist, ff_speed, speeds_mps, inv_speeds))
-            if edge.bidirectional:
-                adj[v].append((u, dist, ff_speed, speeds_mps, inv_speeds))
+        if type(self.traffic) is ProceduralTrafficOverlay:
+            obs_map = self.traffic.observed_way_speeds
+            hourly_alpha = self.traffic.hourly_alpha
+            class_weights = self.traffic.road_class_weights
+            hour_keys = tuple(f"{s:02d}" for s in range(num_bins))
+            alphas_by_class: dict[str, list[float]] = {}
+            fallback_cache: dict[tuple[float, str], tuple[list[float], list[float]]] = {}
+            max_class_weight = max(class_weights.values(), default=1.0)
+            max_alpha = max(hourly_alpha, default=1.0)
+            worst_slowdown = max(3.5, 1.0 + max(0.0, max_alpha - 1.0) * max_class_weight)
+            bin_max_alpha = tuple(
+                max(1.0, 1.0 + (hourly_alpha[s] - 1.0) * max_class_weight)
+                for s in range(num_bins)
+            )
 
-        self._adj = adj
-        self._pinned_adj: list[list[tuple[int, float, float, int]]] = [
-            [] for _ in range(self._num_v)
+            for edge in self.edges.values():
+                u = node_to_idx[edge.from_node]
+                v = node_to_idx[edge.to_node]
+                dist = float(edge.distance_m)
+                ff_kmh = float(edge.free_flow_speed_kmh)
+                ff_speed = ff_kmh / 3.6
+                observed = None
+                if edge.osm_way_ids:
+                    for way_id in edge.osm_way_ids:
+                        if way_id in obs_map:
+                            observed = obs_map[way_id]
+                            break
+                if observed is not None:
+                    speeds_mps = [
+                        max(1.0, min(ff_kmh, float(observed[hour_keys[s]]))) / 3.6
+                        for s in range(num_bins)
+                    ]
+                    inv_speeds = [1.0 / val for val in speeds_mps]
+                else:
+                    r_class = edge.road_class
+                    f_key = (ff_kmh, r_class)
+                    cached_sp = fallback_cache.get(f_key)
+                    if cached_sp is None:
+                        alphas = alphas_by_class.get(r_class)
+                        if alphas is None:
+                            w_class = class_weights.get(r_class, 1.0)
+                            alphas = [1.0 + (hourly_alpha[s] - 1.0) * w_class for s in range(num_bins)]
+                            alphas_by_class[r_class] = alphas
+                        speeds_mps = [max(1.0, ff_kmh / alphas[s]) / 3.6 for s in range(num_bins)]
+                        inv_speeds = [1.0 / val for val in speeds_mps]
+                        cached_sp = (speeds_mps, inv_speeds)
+                        fallback_cache[f_key] = cached_sp
+                    speeds_mps, inv_speeds = cached_sp
+                compact_edges.append((u, v, dist, ff_speed, speeds_mps, inv_speeds, bool(edge.bidirectional)))
+                adj[u].append((v, dist, ff_speed, speeds_mps, inv_speeds))
+                if edge.bidirectional:
+                    adj[v].append((u, dist, ff_speed, speeds_mps, inv_speeds))
+        else:
+            has_speed_for = hasattr(self.traffic, "speed_for")
+            traffic_edges = getattr(self.traffic, "edges", None)
+            hour_keys = tuple(f"{s:02d}" for s in range(num_bins))
+            for edge in self.edges.values():
+                u = node_to_idx[edge.from_node]
+                v = node_to_idx[edge.to_node]
+                dist = float(edge.distance_m)
+                ff_speed = float(edge.free_flow_speed_kmh) / 3.6
+                if has_speed_for:
+                    speeds_mps = [
+                        max(1e-6, float(self.traffic.speed_for(edge, s)) / 3.6)
+                        for s in range(num_bins)
+                    ]
+                else:
+                    prof = (
+                        traffic_edges[edge.id]
+                        if traffic_edges is not None
+                        else self.traffic[edge.id]
+                    )
+                    speeds_mps = [
+                        max(1e-6, float(prof.hourly_speed_kmh[hour_keys[s]]) / 3.6)
+                        for s in range(num_bins)
+                    ]
+                min_sp = min(speeds_mps)
+                if min_sp > 0:
+                    worst_slowdown = max(worst_slowdown, ff_speed / min_sp)
+                inv_speeds = [1.0 / s for s in speeds_mps]
+                compact_edges.append((u, v, dist, ff_speed, speeds_mps, inv_speeds, bool(edge.bidirectional)))
+                adj[u].append((v, dist, ff_speed, speeds_mps, inv_speeds))
+                if edge.bidirectional:
+                    adj[v].append((u, dist, ff_speed, speeds_mps, inv_speeds))
+
+        # Xác định sẵn mọi mốc chuyển pha trên miền toàn cục của traffic
+        transitions: list[float] = []
+        if len(compact_edges) > 20_000 and hasattr(self.traffic, "hourly_alpha"):
+            alphas = self.traffic.hourly_alpha
+            for b in range(1, num_bins):
+                boundary = bin_edges[b]
+                if alphas[b - 1] != alphas[b]:
+                    transitions.append(boundary)
+        if not transitions:
+            for b in range(1, num_bins):
+                boundary = bin_edges[b]
+                if any(row[4][b - 1] != row[4][b] for row in compact_edges):
+                    transitions.append(boundary)
+
+        core_v = 0
+        orig_to_core = None
+        core_adj = None
+        peeled = None
+        peel_parent = None
+        node_to_chain = None
+        chains = None
+        chain_shortcuts = None
+        if use_cache:
+            (
+                core_v,
+                orig_to_core,
+                core_adj,
+                peeled,
+                peel_parent,
+                node_to_chain,
+                chains,
+                chain_shortcuts,
+            ) = self._build_core_contraction(num_v, adj)
+
+        compact_data = _CompactGraphData(
+            nodes_ref=self.nodes,
+            edges_ref=self.edges,
+            traffic_ref=self.traffic,
+            node_ids=node_ids,
+            node_to_idx=node_to_idx,
+            num_v=num_v,
+            bin_edges=bin_edges,
+            num_bins=num_bins,
+            cycle_start=cycle_start,
+            cycle_end=cycle_end,
+            cycle=cycle,
+            uniform_bin_width=uniform_bin_width,
+            adj=adj,
+            compact_edges=compact_edges,
+            transitions=tuple(transitions),
+            worst_slowdown=worst_slowdown,
+            bin_max_alpha=bin_max_alpha,
+            core_v=core_v,
+            orig_to_core=orig_to_core,
+            core_adj=core_adj,
+            peeled=peeled,
+            peel_parent=peel_parent,
+            node_to_chain=node_to_chain,
+            chains=chains,
+            chain_shortcuts=chain_shortcuts,
+        )
+        if use_cache:
+            with _COMPACT_GRAPH_CACHE_LOCK:
+                _COMPACT_GRAPH_CACHE[cache_key] = compact_data
+                if len(_COMPACT_GRAPH_CACHE) > _COMPACT_GRAPH_CACHE_MAXSIZE:
+                    _COMPACT_GRAPH_CACHE.popitem(last=False)
+        self._apply_compact_data(compact_data)
+
+    @staticmethod
+    def _build_core_contraction(
+        num_v: int,
+        adj: list[list[tuple[int, float, float, list[float], list[float]]]],
+    ) -> tuple[
+        int,
+        list[int],
+        list[list[tuple[int, float, float, list[float], list[float]]]],
+        list[bool],
+        list[int],
+        list[int],
+        list[tuple[int, int, tuple[int, ...], Any, Any]],
+        list[tuple[int, int, Any, Any]],
+    ]:
+        """Rút gọn nhánh cụt (hẻm cụt) và nén chuỗi bậc 2 đồng tốc mà vẫn khôi phục chính xác cho tập đích."""
+        undir_nbrs: list[list[int]] = [[] for _ in range(num_v)]
+        for u in range(num_v):
+            edges_u = adj[u]
+            if not edges_u:
+                continue
+            un_u = undir_nbrs[u]
+            for v, _, _, _, _ in edges_u:
+                if u != v and v not in un_u:
+                    un_u.append(v)
+                    undir_nbrs[v].append(u)
+
+        peel_parent = [-1] * num_v
+        peeled = [False] * num_v
+        q = [u for u in range(num_v) if len(undir_nbrs[u]) <= 1]
+        while q:
+            u = q.pop()
+            if peeled[u] or len(undir_nbrs[u]) > 1:
+                continue
+            peeled[u] = True
+            if undir_nbrs[u]:
+                w = undir_nbrs[u][0]
+                peel_parent[u] = w
+                undir_nbrs[w].remove(u)
+                if not peeled[w] and len(undir_nbrs[w]) <= 1:
+                    q.append(w)
+                undir_nbrs[u].clear()
+
+        contractable = [False] * num_v
+        nbr_pair: list[tuple[int, int] | None] = [None] * num_v
+        for x in range(num_v):
+            if peeled[x] or len(undir_nbrs[x]) != 2:
+                continue
+            a, b = undir_nbrs[x]
+            ax = [row for row in adj[a] if row[0] == x]
+            if len(ax) > 1:
+                continue
+            xb = [row for row in adj[x] if row[0] == b]
+            if len(xb) > 1:
+                continue
+            bx = [row for row in adj[b] if row[0] == x]
+            if len(bx) > 1:
+                continue
+            xa = [row for row in adj[x] if row[0] == a]
+            if len(xa) > 1:
+                continue
+            fwd_ok = (not ax and not xb) or (
+                len(ax) == 1 and len(xb) == 1 and (ax[0][3] is xb[0][3] or ax[0][3] == xb[0][3])
+            )
+            rev_ok = (not bx and not xa) or (
+                len(bx) == 1 and len(xa) == 1 and (bx[0][3] is xa[0][3] or bx[0][3] == xa[0][3])
+            )
+            if fwd_ok and rev_ok and (ax or bx):
+                contractable[x] = True
+                nbr_pair[x] = (a, b)
+
+        node_to_chain = [-1] * num_v
+        chains: list[tuple[int, int, tuple[int, ...], Any, Any]] = []
+        visited_c = [False] * num_v
+        for x in range(num_v):
+            if not contractable[x] or visited_c[x]:
+                continue
+            pair0 = nbr_pair[x]
+            assert pair0 is not None
+            a0, b0 = pair0
+            left_nodes: list[int] = []
+            cur, prev = a0, x
+            is_cycle = False
+            while contractable[cur]:
+                if cur == x:
+                    is_cycle = True
+                    break
+                left_nodes.append(cur)
+                pair_cur = nbr_pair[cur]
+                assert pair_cur is not None
+                na, nb = pair_cur
+                nxt = na if nb == prev else nb
+                prev, cur = cur, nxt
+            if is_cycle:
+                contractable[x] = False
+                for z in left_nodes:
+                    contractable[z] = False
+                continue
+            end_a = cur
+            right_nodes: list[int] = []
+            cur, prev = b0, x
+            while contractable[cur]:
+                right_nodes.append(cur)
+                pair_cur = nbr_pair[cur]
+                assert pair_cur is not None
+                na, nb = pair_cur
+                nxt = na if nb == prev else nb
+                prev, cur = cur, nxt
+            end_b = cur
+            if end_a == end_b:
+                contractable[x] = False
+                for z in left_nodes:
+                    contractable[z] = False
+                for z in right_nodes:
+                    contractable[z] = False
+                continue
+
+            interior = tuple(reversed(left_nodes)) + (x,) + tuple(right_nodes)
+            for z in interior:
+                visited_c[z] = True
+            full_seq = (end_a,) + interior + (end_b,)
+
+            def _compose_chain(seq: tuple[int, ...]) -> tuple[float, float, list[float], list[float]] | None:
+                d_sum = 0.0
+                ff_t_sum = 0.0
+                sp_ref = inv_ref = None
+                for idx in range(len(seq) - 1):
+                    u_i, v_i = seq[idx], seq[idx + 1]
+                    edge_match = next((row for row in adj[u_i] if row[0] == v_i), None)
+                    if edge_match is None:
+                        return None
+                    _, d_e, ff_e, sp_e, inv_e = edge_match
+                    if sp_ref is None:
+                        sp_ref, inv_ref = sp_e, inv_e
+                    elif sp_ref is not sp_e and sp_ref != sp_e:
+                        return None
+                    d_sum += d_e
+                    ff_t_sum += d_e / max(ff_e, 1e-12)
+                if sp_ref is None or inv_ref is None:
+                    return None
+                return (d_sum, ff_t_sum, sp_ref, inv_ref)
+
+            fwd_edge = _compose_chain(full_seq)
+            rev_edge = _compose_chain(full_seq[::-1])
+            if fwd_edge is None and rev_edge is None:
+                for z in interior:
+                    contractable[z] = False
+                continue
+            cid = len(chains)
+            for z in interior:
+                node_to_chain[z] = cid
+            chains.append((end_a, end_b, interior, fwd_edge, rev_edge))
+
+        orig_to_core = [-1] * num_v
+        core_nodes: list[int] = []
+        for u in range(num_v):
+            if not peeled[u] and node_to_chain[u] < 0:
+                orig_to_core[u] = len(core_nodes)
+                core_nodes.append(u)
+
+        core_v = len(core_nodes)
+        core_adj: list[list[tuple[int, float, float, list[float], list[float]]]] = [
+            [] for _ in range(core_v)
         ]
-        for eid_idx, (u, v, dist, ff_speed, _, _) in enumerate(self._compact_edges):
-            self._pinned_adj[u].append((v, dist, dist / max(ff_speed, 1e-12), eid_idx))
-            # Kiểm tra nếu đồ thị gốc là 2 chiều thông qua adj
-        # Re-build _pinned_adj trực tiếp cho cả hai chiều để tránh mất cạnh ngược:
-        self._pinned_adj = [[] for _ in range(self._num_v)]
-        self._directed_edge_data: list[tuple[int, int, float, list[float]]] = []
-        for edge in self.edges.values():
-            u = self._node_to_idx[edge.from_node]
-            v = self._node_to_idx[edge.to_node]
-            dist = float(edge.distance_m)
-            ff_cost = dist / max(float(edge.free_flow_speed_kmh) / 3.6, 1e-12)
-            if has_speed_for:
-                speeds_mps = [
-                    max(1e-6, float(self.traffic.speed_for(edge, s)) / 3.6)
-                    for s in range(self._num_bins)
-                ]
-            else:
-                prof = (
-                    traffic_edges[edge.id]
-                    if traffic_edges is not None
-                    else self.traffic[edge.id]
-                )
-                speeds_mps = [
-                    max(1e-6, float(prof.hourly_speed_kmh[f"{s:02d}"]) / 3.6)
-                    for s in range(self._num_bins)
-                ]
-            d_idx = len(self._directed_edge_data)
-            self._directed_edge_data.append((u, v, dist, speeds_mps))
-            self._pinned_adj[u].append((v, dist, ff_cost, d_idx))
-            if edge.bidirectional:
-                d_idx_rev = len(self._directed_edge_data)
-                self._directed_edge_data.append((v, u, dist, speeds_mps))
-                self._pinned_adj[v].append((u, dist, ff_cost, d_idx_rev))
+        for cu, u in enumerate(core_nodes):
+            for v, dist, ff_sp, sp, inv_sp in adj[u]:
+                cv = orig_to_core[v]
+                if cv >= 0:
+                    core_adj[cu].append((cv, dist, dist / max(ff_sp, 1e-12), sp, inv_sp))
 
+        chain_shortcuts: list[tuple[int, int, Any, Any]] = []
+        for ea, eb, _, fwd_e, rev_e in chains:
+            cea, ceb = orig_to_core[ea], orig_to_core[eb]
+            f_tup = (ceb, fwd_e[0], fwd_e[1], fwd_e[2], fwd_e[3]) if fwd_e is not None else None
+            r_tup = (cea, rev_e[0], rev_e[1], rev_e[2], rev_e[3]) if rev_e is not None else None
+            if f_tup is not None:
+                core_adj[cea].append(f_tup)
+            if r_tup is not None:
+                core_adj[ceb].append(r_tup)
+            chain_shortcuts.append((cea, ceb, f_tup, r_tup))
+
+        return core_v, orig_to_core, core_adj, peeled, peel_parent, node_to_chain, chains, chain_shortcuts
+
+    def _apply_compact_data(self, data: _CompactGraphData) -> None:
+        self._shared_graph = data
+        self._node_ids = data.node_ids
+        self._node_to_idx = data.node_to_idx
+        self._num_v = data.num_v
+        self._cust_v = [self._node_to_idx[nid] for nid in self.instance.road_node_ids]
+        self._target_v_set = set(self._cust_v)
+        self._bin_edges = data.bin_edges
+        self._num_bins = data.num_bins
+        self._cycle_start = data.cycle_start
+        self._cycle_end = data.cycle_end
+        self._cycle = data.cycle
+        self._uniform_bin_width = data.uniform_bin_width
+        self._adj = data.adj
+        self._compact_edges = data.compact_edges
+        self._all_transitions = data.transitions
+        self._worst_slowdown = data.worst_slowdown
+        self._bin_max_alpha = data.bin_max_alpha
+        self._pinned_adj = data.pinned_adj
+        self._directed_edge_data = data.directed_edge_data
         self._edge_atfs: dict[int, NDCPWLF] = {}
         self._lookback = 1800.0
 
+    def _instantiate_run_graph(self) -> None:
+        data = self._shared_graph
+        if data.core_adj is None or data.orig_to_core is None:
+            self._run_adj = [
+                [(v, d, d / max(ff, 1e-12), sp, inv_sp) for v, d, ff, sp, inv_sp in row]
+                for row in self._adj
+            ]
+            self._orig_to_run = list(range(self._num_v))
+            self._run_num_v = self._num_v
+            self._run_targets = set(self._cust_v)
+            return
+
+        assert (
+            data.peeled is not None
+            and data.peel_parent is not None
+            and data.node_to_chain is not None
+            and data.chains is not None
+            and data.chain_shortcuts is not None
+        )
+        peeled = data.peeled
+        peel_parent = data.peel_parent
+        node_to_chain = data.node_to_chain
+        chains = data.chains
+        chain_shortcuts = data.chain_shortcuts
+
+        run_adj = [row[:] for row in data.core_adj]
+        v_map = data.orig_to_core[:]
+        core_v = data.core_v
+        adj = self._adj
+        extra_count = 0
+
+        def _ensure_node(orig_u: int) -> int:
+            nonlocal extra_count
+            cu = v_map[orig_u]
+            if cu >= 0:
+                return cu
+            cu = core_v + extra_count
+            extra_count += 1
+            v_map[orig_u] = cu
+            run_adj.append([])
+            return cu
+
+        broken_chains: set[int] = set()
+        restored_peeled: set[int] = set()
+        pending_stems: list[list[int]] = []
+
+        for tv in self._cust_v:
+            if peeled[tv]:
+                cur = tv
+                stem: list[int] = []
+                while peeled[cur]:
+                    if cur in restored_peeled:
+                        break
+                    stem.append(cur)
+                    nxt = peel_parent[cur]
+                    if nxt < 0:
+                        break
+                    cur = nxt
+                if cur >= 0 and node_to_chain[cur] >= 0:
+                    broken_chains.add(node_to_chain[cur])
+                for z in stem:
+                    restored_peeled.add(z)
+                    _ensure_node(z)
+                if stem:
+                    pending_stems.append(stem)
+            elif node_to_chain[tv] >= 0:
+                broken_chains.add(node_to_chain[tv])
+
+        for cid in broken_chains:
+            ea, eb, interior, _, _ = chains[cid]
+            cea, ceb, f_tup, r_tup = chain_shortcuts[cid]
+            if f_tup is not None:
+                run_adj[cea] = [e for e in run_adj[cea] if e is not f_tup]
+            if r_tup is not None:
+                run_adj[ceb] = [e for e in run_adj[ceb] if e is not r_tup]
+            for z in interior:
+                _ensure_node(z)
+            full_seq = (ea,) + interior + (eb,)
+            for i in range(len(full_seq) - 1):
+                u_i, v_i = full_seq[i], full_seq[i + 1]
+                cu, cv = v_map[u_i], v_map[v_i]
+                for vv, d, ff, sp, inv_sp in adj[u_i]:
+                    if vv == v_i:
+                        run_adj[cu].append((cv, d, d / max(ff, 1e-12), sp, inv_sp))
+                for vv, d, ff, sp, inv_sp in adj[v_i]:
+                    if vv == u_i:
+                        run_adj[cv].append((cu, d, d / max(ff, 1e-12), sp, inv_sp))
+
+        for stem in pending_stems:
+            for z in stem:
+                cz = v_map[z]
+                for v, d, ff, sp, inv_sp in adj[z]:
+                    if v_map[v] >= 0:
+                        run_adj[cz].append((v_map[v], d, d / max(ff, 1e-12), sp, inv_sp))
+                w = peel_parent[z]
+                if w >= 0 and w not in restored_peeled and v_map[w] >= 0:
+                    cw = v_map[w]
+                    for vv, d, ff, sp, inv_sp in adj[w]:
+                        if vv == z:
+                            run_adj[cw].append((cz, d, d / max(ff, 1e-12), sp, inv_sp))
+
+        self._run_adj = run_adj
+        self._orig_to_run = v_map
+        self._run_num_v = core_v + extra_count
+        self._run_targets = {v_map[v] for v in self._cust_v}
+
+    def _ensure_pinned_structures(self) -> None:
+        if self._pinned_adj is not None and self._directed_edge_data is not None:
+            return
+        pinned_adj: list[list[tuple[int, float, float, int]]] = [[] for _ in range(self._num_v)]
+        directed_edge_data: list[tuple[int, int, float, list[float]]] = []
+        for u, v, dist, ff_speed, speeds_mps, _, bidir in self._compact_edges:
+            ff_cost = dist / max(ff_speed, 1e-12)
+            d_idx = len(directed_edge_data)
+            directed_edge_data.append((u, v, dist, speeds_mps))
+            pinned_adj[u].append((v, dist, ff_cost, d_idx))
+            if bidir:
+                d_idx_rev = len(directed_edge_data)
+                directed_edge_data.append((v, u, dist, speeds_mps))
+                pinned_adj[v].append((u, dist, ff_cost, d_idx_rev))
+        self._pinned_adj = pinned_adj
+        self._directed_edge_data = directed_edge_data
+        self._shared_graph.pinned_adj = pinned_adj
+        self._shared_graph.directed_edge_data = directed_edge_data
+
     def _find_transitions(self) -> list[float]:
-        transitions: list[float] = []
         h_start, h_end = self.horizon
-        if len(self._compact_edges) > 20_000 and hasattr(self.traffic, "hourly_alpha"):
-            alphas = self.traffic.hourly_alpha
-            for b in range(1, self._num_bins):
-                boundary = self._bin_edges[b]
-                if h_start < boundary < h_end and alphas[b - 1] != alphas[b]:
-                    transitions.append(boundary)
-            if transitions:
-                return transitions
-        for b in range(1, self._num_bins):
-            boundary = self._bin_edges[b]
-            if not (h_start < boundary < h_end):
-                continue
-            changed = any(
-                row[4][b - 1] != row[4][b] for row in self._compact_edges
-            )
-            if changed:
-                transitions.append(boundary)
-        return transitions
+        return [b for b in self._all_transitions if h_start < b < h_end]
 
     def _build_grid(self) -> None:
         h_start, h_end = self.horizon
@@ -374,28 +995,49 @@ class _HCMCATFProvider:
             self._grid = pts
             return
 
+        active_start = max(h_start, self.earliest_departure)
+        active_end = min(h_end, self._active_end) if self._active_end is not None else h_end
+        if active_start > active_end:
+            active_start = h_start
+            active_end = h_end
+
         transitions = self._find_transitions()
-        grid_set = {h_start, h_end}
-        if not transitions:
-            self._grid = [h_start, h_end]
-            return
-        for tr in transitions:
+        grid_set = {h_start, active_start, active_end, h_end}
+        active_transitions = [tr for tr in transitions if active_start < tr <= active_end]
+        for tr in active_transitions:
             grid_set.add(tr)
             t = tr - step
-            earliest_win = max(h_start, tr - self._lookback)
+            earliest_win = max(active_start, tr - self._lookback)
             while t >= earliest_win - 1e-9:
-                if t > h_start:
+                if t > active_start:
                     grid_set.add(t)
                 t -= step
             # Thêm điểm lấy mẫu giữa nếu lookback nhỏ hơn transition
             mid = tr - min(0.5 * step, 150.0)
-            if h_start < mid < tr:
+            if active_start < mid < tr:
                 grid_set.add(mid)
         self._grid = sorted(grid_set)
 
-    def _td_dijkstra_from_vertex(self, src_v: int, t0: float) -> list[float]:
-        num_v = self._num_v
-        adj = self._adj
+    def _td_dijkstra_from_vertex(self, src_v: int, t0: float) -> dict[int, float]:
+        cached = self._tree_cache.get((src_v, t0))
+        if cached is not None:
+            return cached
+
+        ref_t = self._reference_zero_time()
+        if self._cycle > 0 and abs(t0 - ref_t) > 1e-9:
+            cycles = round((t0 - ref_t) / self._cycle)
+            if abs((t0 - ref_t) - cycles * self._cycle) <= 1e-9:
+                base_map = self._td_dijkstra_from_vertex(src_v, ref_t)
+                delta = t0 - ref_t
+                shifted = {k: val + delta for k, val in base_map.items()}
+                self._tree_cache[(src_v, t0)] = shifted
+                return shifted
+
+        run_src = self._orig_to_run[src_v]
+        if run_src < 0:
+            raise ValueError(f"Đỉnh nguồn {src_v} không nằm trong đồ thị chạy")
+        num_v = self._run_num_v
+        adj = self._run_adj
         bin_edges = self._bin_edges
         num_bins = self._num_bins
         cycle_start = self._cycle_start
@@ -403,10 +1045,10 @@ class _HCMCATFProvider:
         uniform_w = self._uniform_bin_width
 
         best = [math.inf] * num_v
-        best[src_v] = t0
-        pq: list[tuple[float, int]] = [(t0, src_v)]
+        best[run_src] = t0
+        pq: list[tuple[float, int]] = [(t0, run_src)]
         visited = [False] * num_v
-        targets = self._target_v_set
+        targets = self._run_targets
         rem_targets = len(targets)
         seen_targets = 0
         heappop = heapq.heappop
@@ -465,22 +1107,58 @@ class _HCMCATFProvider:
                 if arr < best[v]:
                     best[v] = arr
                     heappush(pq, (arr, v))
-        return best
 
-    def _free_flow_dijkstra_from_vertex(self, src_v: int) -> tuple[list[float], list[int]]:
+        orig_to_run = self._orig_to_run
+        result = {tgt_v: best[orig_to_run[tgt_v]] for tgt_v in self._target_v_set}
+        self._tree_cache[(src_v, t0)] = result
+        return result
+
+    def _free_flow_dijkstra_from_vertex(self, src_v: int, *, need_pred: bool = True) -> tuple[Any, list[int]]:
+        heappop = heapq.heappop
+        heappush = heapq.heappush
+
+        if not need_pred:
+            run_src = self._orig_to_run[src_v]
+            num_v = self._run_num_v
+            best = [math.inf] * num_v
+            best[run_src] = 0.0
+            pq: list[tuple[float, int]] = [(0.0, run_src)]
+            visited = [False] * num_v
+            targets = self._run_targets
+            rem_targets = len(targets)
+            seen_targets = 0
+            adj = self._run_adj
+            while pq:
+                cost, u = heappop(pq)
+                if visited[u]:
+                    continue
+                visited[u] = True
+                if u in targets:
+                    seen_targets += 1
+                    if seen_targets >= rem_targets:
+                        break
+                for v, _, ff_cost, _, _ in adj[u]:
+                    if visited[v]:
+                        continue
+                    cand = cost + ff_cost
+                    if cand < best[v]:
+                        best[v] = cand
+                        heappush(pq, (cand, v))
+            orig_to_run = self._orig_to_run
+            return {tgt_v: best[orig_to_run[tgt_v]] for tgt_v in self._target_v_set}, []
+
         num_v = self._num_v
-        adj = self._pinned_adj
         best = [math.inf] * num_v
-        pred_edge = [-1] * num_v
         best[src_v] = 0.0
-        pq: list[tuple[float, int]] = [(0.0, src_v)]
+        pq = [(0.0, src_v)]
         visited = [False] * num_v
         targets = self._target_v_set
         rem_targets = len(targets)
         seen_targets = 0
-        heappop = heapq.heappop
-        heappush = heapq.heappush
-
+        self._ensure_pinned_structures()
+        assert self._pinned_adj is not None
+        p_adj = self._pinned_adj
+        pred_edge = [-1] * num_v
         while pq:
             cost, u = heappop(pq)
             if visited[u]:
@@ -490,7 +1168,7 @@ class _HCMCATFProvider:
                 seen_targets += 1
                 if seen_targets >= rem_targets:
                     break
-            for v, _, ff_cost, d_idx in adj[u]:
+            for v, _, ff_cost, d_idx in p_adj[u]:
                 if visited[v]:
                     continue
                 cand = cost + ff_cost
@@ -500,10 +1178,125 @@ class _HCMCATFProvider:
                     heappush(pq, (cand, v))
         return best, pred_edge
 
+    def _trace_fastest_path(
+        self, source_node_id: int, target_node_id: int, departure: float
+    ) -> tuple[list[int], list[str], float]:
+        src_v = self._node_to_idx[source_node_id]
+        tgt_v = self._node_to_idx[target_node_id]
+        if src_v == tgt_v:
+            return [source_node_id], [], 0.0
+
+        num_v = self._num_v
+        adj = self._adj
+        bin_edges = self._bin_edges
+        num_bins = self._num_bins
+        cycle_start = self._cycle_start
+        cycle = self._cycle
+        uniform_w = self._uniform_bin_width
+
+        t0 = float(departure)
+        best = [math.inf] * num_v
+        best[src_v] = t0
+        pred_v = [-1] * num_v
+        pq: list[tuple[float, int]] = [(t0, src_v)]
+        visited = [False] * num_v
+        heappop = heapq.heappop
+        heappush = heapq.heappush
+
+        while pq:
+            t, u = heappop(pq)
+            if visited[u]:
+                continue
+            visited[u] = True
+            if u == tgt_v:
+                break
+
+            rel = (t - cycle_start) % cycle
+            if uniform_w is not None:
+                slot = int(rel // uniform_w)
+                if slot >= num_bins:
+                    slot = num_bins - 1
+            else:
+                slot = min(bisect_right(bin_edges, cycle_start + rel) - 1, num_bins - 1)
+            b_end = bin_edges[slot + 1]
+            cur_local = cycle_start + rel
+
+            for v, d, _, sp, inv_sp in adj[u]:
+                if visited[v]:
+                    continue
+                dt = d * inv_sp[slot]
+                if cur_local + dt <= b_end + 1e-9:
+                    arr = t + dt
+                else:
+                    rem = d
+                    cur = t
+                    while True:
+                        r_loc = (cur - cycle_start) % cycle
+                        if uniform_w is not None:
+                            c_slot = int(r_loc // uniform_w)
+                            if c_slot >= num_bins:
+                                c_slot = num_bins - 1
+                        else:
+                            c_slot = min(
+                                bisect_right(bin_edges, cycle_start + r_loc) - 1,
+                                num_bins - 1,
+                            )
+                        s_mps = sp[c_slot]
+                        to_b = bin_edges[c_slot + 1] - (cycle_start + r_loc)
+                        if to_b <= 1e-12:
+                            to_b = cycle
+                        poss = s_mps * to_b
+                        if poss + 1e-9 >= rem:
+                            arr = cur + rem * inv_sp[c_slot]
+                            break
+                        rem -= poss
+                        cur += to_b
+                if arr < best[v]:
+                    best[v] = arr
+                    pred_v[v] = u
+                    heappush(pq, (arr, v))
+
+        if not math.isfinite(best[tgt_v]):
+            raise ValueError(f"No route from {source_node_id} to {target_node_id}")
+
+        idx_path = [tgt_v]
+        cur_v = tgt_v
+        while cur_v != src_v:
+            cur_v = pred_v[cur_v]
+            if cur_v < 0:
+                raise ValueError(f"No route from {source_node_id} to {target_node_id}")
+            idx_path.append(cur_v)
+        idx_path.reverse()
+
+        node_ids = self._node_ids
+        node_path = [node_ids[v] for v in idx_path]
+        adjacency = prepare_adjacency(self.graph)
+        edge_path: list[str] = []
+        clock = t0
+        total_dist = 0.0
+        for i in range(len(node_path) - 1):
+            nu, nv = node_path[i], node_path[i + 1]
+            cands = [edge for nb, edge in adjacency.get(nu, ()) if nb == nv]
+            if len(cands) == 1:
+                chosen = cands[0]
+                dt = get_edge_travel_time(chosen, clock, self.traffic)
+            elif cands:
+                best_pair = min(
+                    ((get_edge_travel_time(edge, clock, self.traffic), edge) for edge in cands),
+                    key=lambda item: item[0],
+                )
+                dt, chosen = best_pair
+            else:
+                raise ValueError(f"Missing edge {nu} -> {nv}")
+            edge_path.append(chosen.id)
+            total_dist += float(chosen.distance_m)
+            clock += dt
+        return node_path, edge_path, total_dist
+
     def _compute_scalar_matrix(self, departure: float) -> list[list[float]]:
         matrix: list[list[float]] = []
         cust_v = self._cust_v
-        cache_by_v: dict[int, list[float]] = {}
+        cache_by_v: dict[int, dict[int, float]] = {}
         for src in range(self.num_nodes):
             sv = cust_v[src]
             if sv not in cache_by_v:
@@ -519,11 +1312,11 @@ class _HCMCATFProvider:
     def _compute_free_flow_matrix(self) -> list[list[float]]:
         matrix: list[list[float]] = []
         cust_v = self._cust_v
-        cache_by_v: dict[int, list[float]] = {}
+        cache_by_v: dict[int, dict[int, float]] = {}
         for src in range(self.num_nodes):
             sv = cust_v[src]
             if sv not in cache_by_v:
-                dist, _ = self._free_flow_dijkstra_from_vertex(sv)
+                dist, _ = self._free_flow_dijkstra_from_vertex(sv, need_pred=False)
                 cache_by_v[sv] = dist
             dist = cache_by_v[sv]
             row = [
@@ -559,6 +1352,8 @@ class _HCMCATFProvider:
         return source_arcs
 
     def _get_directed_edge_atf(self, d_idx: int) -> NDCPWLF:
+        self._ensure_pinned_structures()
+        assert self._directed_edge_data is not None
         atf = self._edge_atfs.get(d_idx)
         if atf is None:
             _, _, dist, speeds_mps = self._directed_edge_data[d_idx]
@@ -569,8 +1364,10 @@ class _HCMCATFProvider:
         return atf
 
     def _build_source_atfs_pinned(self, source_cust: int) -> dict[int, NDCPWLF]:
+        self._ensure_pinned_structures()
+        assert self._directed_edge_data is not None
         src_v = self._cust_v[source_cust]
-        _, pred_edge = self._free_flow_dijkstra_from_vertex(src_v)
+        _, pred_edge = self._free_flow_dijkstra_from_vertex(src_v, need_pred=True)
         grid = self._grid
         arrivals: dict[int, list[float]] = {src_v: list(grid)}
         source_arcs: dict[int, NDCPWLF] = {}
@@ -667,6 +1464,8 @@ class _HCMCExactSplitEvaluator:
             sample_step=sample_step,
             simplify_tolerance=simplify_tolerance,
             routing_policy=routing_policy,
+            earliest_departure=self.earliest_departure,
+            latest_departure=self.latest_departure,
         )
         self.routing_policy = self.atf_provider.routing_policy
         self.route_cache: dict[tuple[int, ...], _RouteState | None] = {}
@@ -1201,12 +2000,18 @@ class _HCMCExactSplitEvaluator:
         while len(solution_routes) < self.instance.num_vehicles:
             solution_routes.append([depot, depot])
         solution = Solution(solution_routes)
-        path_evaluator = HCMCTDVRPEvaluator(
-            self.instance,
-            self.graph,
-            self.traffic,
-            start_time=self.earliest_departure,
+        path_evaluator: HCMCTDVRPEvaluator | None = None
+        use_fast_trace = (
+            self.atf_provider._external_atfs is None
+            and self.routing_policy != "pinned_free_flow_paths"
         )
+        if not use_fast_trace:
+            path_evaluator = HCMCTDVRPEvaluator(
+                self.instance,
+                self.graph,
+                self.traffic,
+                start_time=self.earliest_departure,
+            )
         route_evaluations: list[RouteEvaluation] = []
 
         for vehicle_index, state in enumerate(candidate.route_states):
@@ -1218,10 +2023,16 @@ class _HCMCExactSplitEvaluator:
                 source_node = self.instance.road_node_ids[leg.source]
                 target_node = self.instance.road_node_ids[leg.target]
                 try:
-                    path = path_evaluator._find_path(source_node, target_node, leg.departure)
-                    leg_nodes = list(path.node_path)
-                    leg_edges = list(path.edge_path)
-                    distance = sum(self.graph[1][edge_id].distance_m for edge_id in leg_edges)
+                    if use_fast_trace:
+                        leg_nodes, leg_edges, distance = self.atf_provider._trace_fastest_path(
+                            source_node, target_node, leg.departure
+                        )
+                    else:
+                        assert path_evaluator is not None
+                        path = path_evaluator._find_path(source_node, target_node, leg.departure)
+                        leg_nodes = list(path.node_path)
+                        leg_edges = list(path.edge_path)
+                        distance = sum(self.graph[1][edge_id].distance_m for edge_id in leg_edges)
                 except (KeyError, ValueError):
                     leg_nodes = [source_node, target_node]
                     leg_edges = []

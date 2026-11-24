@@ -71,7 +71,8 @@ function createDefaultDepot(): DepotDraft {
 }
 
 function createPointDraft(
-  value: Partial<CustomCustomerPayload> = {}
+  value: Partial<CustomCustomerPayload> = {},
+  defaultServiceMinutes = "5"
 ): CustomPointDraft {
   const uid =
     typeof crypto !== "undefined" && "randomUUID" in crypto
@@ -89,7 +90,9 @@ function createPointDraft(
     lon: lonStr,
     demand: value.demand != null ? String(value.demand) : "1",
     serviceMinutes:
-      value.service_time == null ? "5" : String(Number(value.service_time) / 60),
+      value.service_time == null
+        ? defaultServiceMinutes
+        : String(Number(value.service_time) / 60),
     windowStart: value.time_window ? inputTime(value.time_window[0]) : "",
     windowEnd: value.time_window ? inputTime(value.time_window[1]) : "",
     resolvedAddress:
@@ -171,6 +174,7 @@ export function App() {
   const [manualMode, setManualMode] = useState(false)
   const [manualVehicles, setManualVehicles] = useState("1")
   const [manualCapacity, setManualCapacity] = useState("100")
+  const [manualServiceMinutes, setManualServiceMinutes] = useState("5")
   const [datasetCapacity, setDatasetCapacity] = useState<number>(100)
   const [depot, setDepot] = useState<DepotDraft>(createDefaultDepot)
   const [customPoints, setCustomPoints] = useState<CustomPointDraft[]>([])
@@ -395,7 +399,11 @@ export function App() {
           candidates: [],
           selectedCandidate: null,
         })
-        setCustomPoints(custom.customers.map((pt) => createPointDraft(pt)))
+        setCustomPoints(
+          custom.customers.map((pt) =>
+            createPointDraft(pt, manualServiceMinutes)
+          )
+        )
       } else {
         setCustomPoints([])
       }
@@ -1002,7 +1010,7 @@ export function App() {
     }
 
     if (enabled && customPoints.length === 0) {
-      setCustomPoints([createPointDraft()])
+      setCustomPoints([createPointDraft({}, manualServiceMinutes)])
     }
 
     if (nextDataset) {
@@ -1012,6 +1020,16 @@ export function App() {
         setStatus(err instanceof Error ? err.message : "Lỗi nạp dataset", true)
       }
     }
+  }
+
+  const handleManualServiceMinutesChange = (value: string) => {
+    setManualServiceMinutes(value)
+    setCustomPoints((prev) =>
+      prev.map((pt) => ({
+        ...pt,
+        serviceMinutes: value,
+      }))
+    )
   }
 
   const handleDatasetChange = async (nextDataset: string) => {
@@ -1494,6 +1512,7 @@ export function App() {
       manualMode={manualMode}
       manualVehicles={manualVehicles}
       manualCapacity={manualCapacity}
+      manualServiceMinutes={manualServiceMinutes}
       depot={depot}
       customPoints={customPoints}
       pendingPick={pendingPick}
@@ -1515,6 +1534,7 @@ export function App() {
       onManualModeChange={(enabled) => void handleManualModeChange(enabled)}
       onManualVehiclesChange={setManualVehicles}
       onManualCapacityChange={setManualCapacity}
+      onManualServiceMinutesChange={handleManualServiceMinutesChange}
       onDepotChange={(patch) => setDepot((prev) => ({ ...prev, ...patch }))}
       onDepotAddressInput={handleDepotAddressInput}
       onDepotCoordInput={handleDepotCoordInput}
@@ -1537,7 +1557,12 @@ export function App() {
         setStatus("Bấm chuột vào đúng vị trí kho trên bản đồ")
         setMobileMenuOpen(false)
       }}
-      onAddPoint={() => setCustomPoints((prev) => [...prev, createPointDraft()])}
+      onAddPoint={() =>
+        setCustomPoints((prev) => [
+          ...prev,
+          createPointDraft({}, manualServiceMinutes),
+        ])
+      }
       onRemovePoint={(uid) =>
         setCustomPoints((prev) => prev.filter((item) => item.uid !== uid))
       }

@@ -515,3 +515,56 @@ def test_hcmc_dataset_uses_and_runs_hcmc_td_erapo(client, monkeypatch):
     assert res['departure_time_mode'] == 'exact_ndcpwlf'
     assert len(res['routes']) == 1
     assert res['routes'][0]['geometry_source'] == 'dataset-road-graph'
+
+
+def test_vietnamese_address_expansion_and_house_parsing():
+    assert backend._query_house_number('140A Lê Trọng Tấn, Q. Tân Phú') == '140a'
+    assert backend._query_house_number('Số 242/11 Tây Thạnh, P. Tây Thạnh') == '242/11'
+
+    tokens_q7 = backend._address_tokens('100 Nguyễn Văn Linh, Q.7')
+    assert {'nguyen', 'van', 'linh', 'quan_7'} <= tokens_q7
+
+    tokens_cmt8 = backend._address_tokens('150 CMT8, P.10, Q.3')
+    assert {'cach', 'mang', 'thang_8', 'phuong_10', 'quan_3'} <= tokens_cmt8
+
+
+def test_geocode_fast_path_hcmc_bbox_and_alley_prefix(client, monkeypatch):
+    point = client.get('/api/datasets/hcmc10').json['points'][0]
+    requested_urls = []
+
+    def fake_urlopen_exact(request, timeout):
+        requested_urls.append(request.full_url)
+        payload = {'features': [{
+            'geometry': {'type': 'Point', 'coordinates': [point['lon'], point['lat']]},
+            'properties': {
+                'housenumber': '150',
+                'street': 'Cách Mạng Tháng Tám',
+                'district': 'Quận 3',
+                'city': 'Hồ Chí Minh',
+            },
+        }]}
+        return BytesIO(json.dumps(payload).encode())
+
+    backend.geocode_address.cache_clear()
+    monkeypatch.setattr(backend, 'GEOCODE_LAST_REQUEST', 0.0)
+    monkeypatch.setattr(backend, 'urlopen', fake_urlopen_exact)
+    res = client.post('/api/geocode', json={'dataset': 'hcmc10', 'address': '150 CMT8, Q.3'})
+    assert res.status_code == 200
+    assert res.json['result']['house_match'] == 'exact'
+    # Fast-path skips Nominatim when Photon finds an exact match inside HCMC bbox
+    assert len(requested_urls) == 1
+    assert 'bbox=106.35%2C10.35%2C107.05%2C11.2' in requested_urls[0]
+
+    # Prefix match for alley entrance (searching 242/11, OSM returns 242 on same street)
+    score, house_match = backend._score_geocode_candidate(
+        '242/11 Tây Thạnh, Tân Phú',
+        {
+            'display_name': '242 Tây Thạnh, Tân Phú, Hồ Chí Minh',
+            'house_number': '242',
+            'provider_order': 0,
+            'source_rank': 0,
+        },
+    )
+    assert house_match == 'prefix'
+    assert score > 100
+

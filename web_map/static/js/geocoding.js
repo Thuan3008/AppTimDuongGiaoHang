@@ -95,6 +95,7 @@ export function renderGeocodeCandidates(note, candidates, selected, address, add
 
     const houseLabels = {
       exact: 'khớp số nhà',
+      prefix: 'khớp đầu hẻm / gần số nhà',
       missing: 'thiếu số nhà',
       wrong: 'sai số nhà',
       not_requested: 'không có số nhà',

@@ -21,6 +21,7 @@ import type {
 
 const HOUSE_LABELS: Record<string, string> = {
   exact: "khớp số nhà",
+  prefix: "khớp đầu hẻm / gần số nhà",
   missing: "thiếu số nhà",
   wrong: "sai số nhà",
   not_requested: "không có số nhà",
@@ -121,11 +122,13 @@ interface ManualPointsEditorProps {
   disabled: boolean
   manualVehicles: string
   manualCapacity: string
+  manualServiceMinutes: string
   depot: DepotDraft
   points: CustomPointDraft[]
   pendingPick: MapPickTarget | null
   onVehiclesChange: (value: string) => void
   onCapacityChange: (value: string) => void
+  onServiceMinutesChange: (value: string) => void
   onDepotChange: (patch: Partial<DepotDraft>) => void
   onDepotAddressInput: (address: string) => void
   onDepotCoordInput: (field: "lat" | "lon", value: string) => void
@@ -147,11 +150,13 @@ export function ManualPointsEditor({
   disabled,
   manualVehicles,
   manualCapacity,
+  manualServiceMinutes,
   depot,
   points,
   pendingPick,
   onVehiclesChange,
   onCapacityChange,
+  onServiceMinutesChange,
   onDepotChange,
   onDepotAddressInput,
   onDepotCoordInput,
@@ -174,7 +179,7 @@ export function ManualPointsEditor({
         Tọa độ gần road graph TP.HCM sẽ được tự động ghép vào nút giao thông gần nhất.
       </p>
 
-      <div className="grid grid-cols-2 gap-2">
+      <div className="grid grid-cols-3 gap-2">
         <div className="flex flex-col gap-1">
           <label htmlFor="manual-vehicles" className="text-xs font-medium">
             Số xe
@@ -191,7 +196,7 @@ export function ManualPointsEditor({
         </div>
         <div className="flex flex-col gap-1">
           <label htmlFor="manual-capacity" className="text-xs font-medium">
-            Tải trọng mỗi xe
+            Tải trọng (kg)
           </label>
           <Input
             id="manual-capacity"
@@ -201,6 +206,22 @@ export function ManualPointsEditor({
             value={manualCapacity}
             onChange={(e) => onCapacityChange(e.target.value)}
             disabled={disabled}
+          />
+        </div>
+        <div className="flex flex-col gap-1">
+          <label htmlFor="manual-service-time" className="text-xs font-medium" title="Thời gian phục vụ mặc định cho các điểm giao">
+            Phục vụ (phút)
+          </label>
+          <Input
+            id="manual-service-time"
+            type="number"
+            min={0}
+            step={0.5}
+            placeholder="5"
+            value={manualServiceMinutes}
+            onChange={(e) => onServiceMinutesChange(e.target.value)}
+            disabled={disabled}
+            title="Thời gian phục vụ mặc định cho các điểm giao (phút)"
           />
         </div>
       </div>
@@ -455,6 +476,7 @@ export function ManualPointsEditor({
                   type="number"
                   min={0}
                   step={0.5}
+                  placeholder={manualServiceMinutes || "5"}
                   value={point.serviceMinutes}
                   onChange={(e) =>
                     onPointChange(point.uid, { serviceMinutes: e.target.value })
