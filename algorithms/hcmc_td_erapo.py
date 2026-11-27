@@ -242,7 +242,7 @@ class _HCMCATFProvider:
             instance.metadata.get("routing_policy", "dynamic_fastest_path")
         )
         self.horizon = (float(instance.horizon[0]), float(instance.horizon[1]))
-        self.step = float(sample_step or instance.sample_step or 300.0)
+        self.step = float(sample_step) if sample_step is not None else 1200.0
         self.simplify_tolerance = float(simplify_tolerance)
         self.earliest_departure = float(earliest_departure)
         self.latest_departure = (
@@ -277,14 +277,12 @@ class _HCMCATFProvider:
 
         self._build_grid()
 
-        # Nếu max hành trình vượt quá cửa sổ tìm trước mặc định, mở rộng lookback và dựng lại lưới.
         max_tt = max(
             max(row)
             for row in self.t0_matrix
         )
         if max_tt > self._lookback:
             self._lookback = max_tt * 1.5
-            self._build_grid()
 
     def _reference_zero_time(self) -> float:
         if self.horizon[0] <= 0.0 <= self.horizon[1]:
@@ -301,14 +299,15 @@ class _HCMCATFProvider:
             slot = min(bisect_right(self._bin_edges, self._cycle_start + rel) - 1, self._num_bins - 1)
         return self._bin_max_alpha[max(0, slot)]
 
-    def _max_single_route_travel(self, matrix: list[list[float]], k_fit: int) -> float:
+    def _max_single_route_travel(self, matrix: list[list[float]], k_fit: int) -> tuple[float, float]:
         n = self.instance.num_customers
         depot = self.instance.depot
         if n <= 0 or k_fit <= 0:
-            return 0.0
+            return 0.0, 0.0
         if n <= 8:
             cap = self.instance.vehicle_capacity + 1e-9
             demands = self.instance.demands
+            svcs = self.instance.service_times
             full = 1 << n
             # dp[(mask << 4) | last_idx] lưu chi phí đường đi dài nhất từ depot tới last (0-based 0..n-1)
             dp = [-1.0] * (full * n)
@@ -354,18 +353,103 @@ class _HCMCATFProvider:
                         cand = val + matrix[last + 1][depot]
                         if cand > best_cycle:
                             best_cycle = cand
-            return best_cycle
+            svc_bound = sum(
+                sorted((float(svcs[c]) for c in range(1, self.num_nodes)), reverse=True)[:k_fit]
+            )
+            return best_cycle, svc_bound
 
-        max_depot_out = max((matrix[depot][c] for c in range(self.num_nodes) if c != depot), default=0.0)
-        row_maxes = sorted(
-            (
-                max((matrix[i][j] for j in range(self.num_nodes) if j != i), default=0.0)
-                for i in range(self.num_nodes)
-                if i != depot
-            ),
-            reverse=True,
-        )
-        return max_depot_out + sum(row_maxes[:k_fit])
+        # Với n > 8: chạy tập mẫu Split nhanh (tôn trọng tải trọng & tách tuyến thực tế)
+        # để tránh cộng dồn phi thực tế các cung chéo toàn thành phố làm phình lưới.
+        cap = self.instance.vehicle_capacity + 1e-9
+        demands = self.instance.demands
+        svcs = self.instance.service_times
+        max_vehicles = self.instance.num_vehicles
+        split_mat = self.t0_matrix if self.t0_matrix is not None else matrix
+
+        def _probe_routes(order: list[int]) -> list[list[int]]:
+            if max_vehicles == 1 and sum(float(demands[c]) for c in order) <= cap:
+                return [order]
+            best = [math.inf] * (n + 1)
+            cnt = [n + 1] * (n + 1)
+            pred = [-1] * (n + 1)
+            best[0] = 0.0
+            cnt[0] = 0
+            for end in range(1, n + 1):
+                load = 0.0
+                cost = 0.0
+                for start in range(end - 1, -1, -1):
+                    c = order[start]
+                    load += float(demands[c])
+                    if load > cap:
+                        break
+                    if start == end - 1:
+                        cost = float(svcs[c]) + split_mat[depot][c] + split_mat[c][depot]
+                    else:
+                        nxt = order[start + 1]
+                        cost += (
+                            float(svcs[c])
+                            + split_mat[depot][c]
+                            + split_mat[c][nxt]
+                            - split_mat[depot][nxt]
+                        )
+                    if not math.isfinite(best[start]):
+                        continue
+                    cand = best[start] + cost
+                    nc = cnt[start] + 1
+                    if cand + 1e-9 < best[end] or (abs(cand - best[end]) <= 1e-9 and nc < cnt[end]):
+                        best[end] = cand
+                        cnt[end] = nc
+                        pred[end] = start
+            routes: list[list[int]] = []
+            cur = n
+            while cur > 0:
+                st = pred[cur]
+                if st < 0:
+                    return []
+                routes.append(order[st:cur])
+                cur = st
+            return routes
+
+        base = list(range(1, n + 1))
+        probe_orders: list[list[int]] = [
+            sorted(base, key=lambda c: -matrix[depot][c]),
+            sorted(base, key=lambda c: (-float(demands[c]), -matrix[depot][c])),
+            sorted(base, key=lambda c: (float(demands[c]), -matrix[depot][c])),
+        ]
+        probe_rng = random.Random(0)
+        for _ in range(24):
+            probe_orders.append(probe_rng.sample(base, n))
+
+        max_travel = 0.0
+        max_service = 0.0
+        max_combined = 0.0
+        for order in probe_orders:
+            for route in _probe_routes(order):
+                if not route:
+                    continue
+                r_travel = matrix[depot][route[0]] + matrix[route[-1]][depot]
+                for idx in range(len(route) - 1):
+                    r_travel += matrix[route[idx]][route[idx + 1]]
+                r_svc = sum(float(svcs[c]) for c in route)
+                if r_travel + r_svc > max_combined:
+                    max_combined = r_travel + r_svc
+                    max_travel = r_travel
+                    max_service = r_svc
+        if max_combined <= 0.0:
+            max_depot_out = max((matrix[depot][c] for c in range(self.num_nodes) if c != depot), default=0.0)
+            row_maxes = sorted(
+                (
+                    max((matrix[i][j] for j in range(self.num_nodes) if j != i), default=0.0)
+                    for i in range(self.num_nodes)
+                    if i != depot
+                ),
+                reverse=True,
+            )
+            svc_bound = sum(
+                sorted((float(svcs[c]) for c in range(1, self.num_nodes)), reverse=True)[:k_fit]
+            )
+            return max_depot_out + sum(row_maxes[:k_fit]), svc_bound
+        return max_travel, max_service
 
     def _estimate_active_end(self, end_h: float) -> float:
         cap = self.instance.vehicle_capacity + 1e-9
@@ -379,14 +463,11 @@ class _HCMCATFProvider:
             else:
                 break
         k_fit = max(1, min(self.instance.num_customers, k_fit))
-        service_bound = sum(
-            sorted((float(self.instance.service_times[c]) for c in range(1, self.num_nodes)), reverse=True)[:k_fit]
-        )
 
         if self._bin_max_alpha is None:
             assert self.ff_matrix is not None
-            max_tour_ff = self._max_single_route_travel(self.ff_matrix, k_fit)
-            span_bound = max_tour_ff * self._worst_slowdown + service_bound + 3600.0
+            max_tour_ff, svc_bound = self._max_single_route_travel(self.ff_matrix, k_fit)
+            span_bound = max_tour_ff * self._worst_slowdown + svc_bound + 3600.0
             active_end = min(self.horizon[1], end_h + span_bound)
             if self.instance.time_windows is not None:
                 max_ready = max(
@@ -398,9 +479,9 @@ class _HCMCATFProvider:
 
         # Tính ma trận thời gian thực tại end_h (được cache lại để tái sử dụng cho _grid)
         end_matrix = self._compute_scalar_matrix(departure=end_h)
-        max_tour_end = self._max_single_route_travel(end_matrix, k_fit)
+        max_tour_end, svc_bound = self._max_single_route_travel(end_matrix, k_fit)
         # Bù biên độ biến thiên cục bộ của observed_way_speeds + service của một tuyến
-        rem_work = max_tour_end * 1.25 + service_bound
+        rem_work = max_tour_end * 1.25 + svc_bound
 
         def _propagate_from(start_t: float, work: float) -> float:
             cur_t = min(self.horizon[1], start_t)
@@ -439,7 +520,8 @@ class _HCMCATFProvider:
             )
             if max_ready > end_h:
                 assert self.ff_matrix is not None
-                ff_span = self._max_single_route_travel(self.ff_matrix, k_fit) * self._worst_slowdown + service_bound + 1800.0
+                ff_travel, ff_svc = self._max_single_route_travel(self.ff_matrix, k_fit)
+                ff_span = ff_travel * self._worst_slowdown + ff_svc + 1800.0
                 active_end = min(self.horizon[1], max(active_end, max_ready + ff_span))
         return max(self.earliest_departure, active_end)
 
@@ -1001,21 +1083,14 @@ class _HCMCATFProvider:
             active_start = h_start
             active_end = h_end
 
-        transitions = self._find_transitions()
         grid_set = {h_start, active_start, active_end, h_end}
-        active_transitions = [tr for tr in transitions if active_start < tr <= active_end]
-        for tr in active_transitions:
-            grid_set.add(tr)
-            t = tr - step
-            earliest_win = max(active_start, tr - self._lookback)
-            while t >= earliest_win - 1e-9:
-                if t > active_start:
-                    grid_set.add(t)
-                t -= step
-            # Thêm điểm lấy mẫu giữa nếu lookback nhỏ hơn transition
-            mid = tr - min(0.5 * step, 150.0)
-            if active_start < mid < tr:
-                grid_set.add(mid)
+        t = active_start + step
+        while t < active_end - 1e-9:
+            grid_set.add(t)
+            t += step
+        for tr in self._find_transitions():
+            if active_start < tr <= active_end:
+                grid_set.add(tr)
         self._grid = sorted(grid_set)
 
     def _td_dijkstra_from_vertex(self, src_v: int, t0: float) -> dict[int, float]:

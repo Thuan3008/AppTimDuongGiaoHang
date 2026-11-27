@@ -8,6 +8,11 @@ export const fmt = (n) => Number(n).toLocaleString('vi-VN', { maximumFractionDig
 
 export const algorithmLabel = (name) => ({
   'RAPO-2709': 'RAPO',
+  'ARO-Original': 'ARO-Original',
+  'POA-Original': 'POA-Original',
+  GA: 'GA',
+  'GA-LS': 'GA-LS',
+  Greedy: 'Greedy',
   'HCMC-TD-ERAPO': 'HCMC-TD-ERAPO',
 }[name] || name);
 

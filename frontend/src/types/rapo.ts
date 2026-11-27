@@ -111,6 +111,8 @@ export interface CustomPointDraft {
   windowEnd: string
   resolvedAddress?: string
   snapConfirmed: boolean
+  snapStatus?: SnapStatus | string
+  snapDistanceM?: number | null
   snapCheckedLat?: string
   snapCheckedLon?: string
   note: string
@@ -127,6 +129,8 @@ export interface DepotDraft {
   lon: string
   resolvedAddress?: string
   snapConfirmed: boolean
+  snapStatus?: SnapStatus | string
+  snapDistanceM?: number | null
   snapCheckedLat?: string
   snapCheckedLon?: string
   note: string
@@ -134,6 +138,30 @@ export interface DepotDraft {
   candidates: GeocodeCandidate[]
   selectedCandidate: GeocodeCandidate | null
   resolving?: boolean
+}
+
+export interface CsvParsedPoint {
+  name: string
+  address: string
+  lat: number | null
+  lon: number | null
+  snap_distance_m: number | null
+  snap_status: SnapStatus | string | null
+  warning: string | null
+  demand: number
+  service_time: number
+  time_window: [number, number] | null
+  needs_geocode: boolean
+}
+
+export interface CsvParseResponse {
+  dataset: string
+  depot: CsvParsedPoint
+  customers: CsvParsedPoint[]
+  vehicles: number | null
+  capacity: number | null
+  geocode_count: number
+  snapped_count: number
 }
 
 export interface OptimizationConfig {
@@ -232,6 +260,7 @@ export interface PlanRouteSummary {
   stops_count: number
   load: number
   duration: number
+  deleted_at?: string | null
 }
 
 export interface PlanMetadata {
@@ -259,11 +288,14 @@ export interface Trip {
   stops_completed: number
   stops_total: number
   job_status?: string
+  deleted_at?: string | null
   plan?: PlanMetadata
 }
 
 export interface AdminJobGroup {
   job_id: string
+  deleted_at?: string | null
+  job_deleted?: boolean
   plan: PlanMetadata
   trips: Trip[]
 }
@@ -271,6 +303,8 @@ export interface AdminJobGroup {
 export interface TripsResponse {
   trips: Trip[]
   jobs: AdminJobGroup[] | null
+  deleted_jobs?: AdminJobGroup[] | null
+  deleted_routes_count?: number
 }
 
 export interface RunJobResponse {
@@ -280,6 +314,7 @@ export interface RunJobResponse {
   stage: string
   payload?: OptimizationPayload
   stops?: TripStop[]
+  deleted?: boolean
 }
 
 export interface MapPickTarget {

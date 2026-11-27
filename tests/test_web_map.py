@@ -1,10 +1,17 @@
 """Kiểm tra API, tọa độ và đường dự phòng của app bản đồ, không gọi Internet."""
 
 import json
+import os
+import tempfile
 from io import BytesIO
 from types import SimpleNamespace
 
 import pytest
+
+os.environ.setdefault(
+    'RAPO_AUTH_DATABASE',
+    os.path.join(tempfile.gettempdir(), 'rapo_pytest_bootstrap.sqlite3'),
+)
 
 from core.data.models import Customer, RoadNode, TDVRPInstance
 from web_map import app as backend
@@ -517,6 +524,93 @@ def test_hcmc_dataset_uses_and_runs_hcmc_td_erapo(client, monkeypatch):
     assert res['routes'][0]['geometry_source'] == 'dataset-road-graph'
 
 
+def test_hk_datasets_expose_main_benchmarks_without_pufferfish_and_run_greedy_once(client, monkeypatch):
+    catalog = client.get('/api/datasets').json['datasets']
+    hk_entries = [item for item in catalog if item['id'].startswith('hk')]
+    assert hk_entries
+    expected_algs = ['RAPO-2709', 'ARO-Original', 'POA-Original', 'GA', 'GA-LS', 'Greedy']
+    assert all(item['algorithms'] == expected_algs for item in hk_entries)
+    assert all('RAPO-Pufferfish' not in item['algorithms'] for item in hk_entries)
+
+    def fail_osrm(_points):
+        raise RuntimeError('offline test')
+
+    monkeypatch.setattr(backend, 'osrm_geometry', fail_osrm)
+    job_id = 'c' * 32
+    backend.JOBS[job_id] = {'id': job_id, 'status': 'queued', 'stage': 'test'}
+    cfg = {
+        'dataset': 'hk25',
+        'trip_name': 'Đối chứng Hong Kong n25',
+        'population_size': 4,
+        'budget': 8,
+        'seed': 0,
+        'num_seeds': 2,
+        'earliest_departure': 28800,
+        'latest_departure': 32400,
+        'algorithms': ['RAPO-2709', 'ARO-Original', 'POA-Original', 'GA', 'GA-LS', 'Greedy'],
+    }
+    backend.run_job(job_id, cfg)
+    job = backend.JOBS[job_id]
+    assert job['status'] == 'completed', job.get('stage')
+    payload = job['payload']
+    assert set(payload['results']) == set(expected_algs)
+    for alg in expected_algs:
+        assert payload['results'][alg]['feasible'] is True
+        assert payload['summary'][alg]['failed'] == 0
+    assert len(payload['runs']['Greedy']) == 1
+    assert payload['runs']['Greedy'][0]['seed'] is None
+    assert payload['summary']['Greedy']['completed'] == 1
+    for alg in ('RAPO-2709', 'ARO-Original', 'POA-Original', 'GA', 'GA-LS'):
+        assert len(payload['runs'][alg]) == 2
+        assert payload['summary'][alg]['completed'] == 2
+
+
+def test_paris_and_tokyo_datasets_exposed_and_runnable(client, monkeypatch):
+    catalog = client.get('/api/datasets').json['datasets']
+    by_id = {item['id']: item for item in catalog}
+    expected_algs = ['RAPO-2709', 'ARO-Original', 'POA-Original', 'GA', 'GA-LS', 'Greedy']
+    expected_names = {
+        'paris10': 'Paris n=10 · HYB · BPR-heavy',
+        'paris25': 'Paris n=25 · HYB · BPR-heavy',
+        'paris50': 'Paris n=50 · HYB · BPR-heavy',
+        'tokyo10': 'Tokyo n=10 · HYB · BPR-heavy',
+        'tokyo25': 'Tokyo n=25 · HYB · BPR-heavy',
+        'tokyo50': 'Tokyo n=50 · HYB · BPR-heavy',
+    }
+    for key, label in expected_names.items():
+        assert key in by_id
+        assert by_id[key]['name'] == label
+        assert by_id[key]['missing'] == []
+        assert by_id[key]['algorithms'] == expected_algs
+        preview = client.get(f'/api/datasets/{key}')
+        assert preview.status_code == 200
+        assert preview.json['customers'] == int(key.lstrip('paristokyo'))
+
+    def fail_osrm(_points):
+        raise RuntimeError('offline test')
+
+    monkeypatch.setattr(backend, 'osrm_geometry', fail_osrm)
+    for idx, key in enumerate(('paris10', 'tokyo10'), start=1):
+        job_id = str(idx) * 32
+        backend.JOBS[job_id] = {'id': job_id, 'status': 'queued', 'stage': 'test'}
+        cfg = {
+            'dataset': key,
+            'trip_name': f'Kiểm thử {key}',
+            'population_size': 4,
+            'budget': 8,
+            'seed': 0,
+            'num_seeds': 1,
+            'earliest_departure': 28800,
+            'latest_departure': 32400,
+            'algorithms': ['RAPO-2709', 'GA', 'Greedy'],
+        }
+        backend.run_job(job_id, cfg)
+        job = backend.JOBS[job_id]
+        assert job['status'] == 'completed', job.get('stage')
+        for alg in ('RAPO-2709', 'GA', 'Greedy'):
+            assert job['payload']['results'][alg]['feasible'] is True
+
+
 def test_vietnamese_address_expansion_and_house_parsing():
     assert backend._query_house_number('140A Lê Trọng Tấn, Q. Tân Phú') == '140a'
     assert backend._query_house_number('Số 242/11 Tây Thạnh, P. Tây Thạnh') == '242/11'
@@ -567,4 +661,215 @@ def test_geocode_fast_path_hcmc_bbox_and_alley_prefix(client, monkeypatch):
     )
     assert house_match == 'prefix'
     assert score > 100
+
+
+def test_csv_template_and_parse_csv_auto_geocode_and_validation(client, monkeypatch):
+    tmpl = client.get('/api/custom-points/csv-template')
+    assert tmpl.status_code == 200
+    assert 'text/csv' in tmpl.content_type
+    assert tmpl.data.startswith(b'\xef\xbb\xbf')
+    assert b'\r\n' in tmpl.data
+    assert 'Kho Tân Phú' in tmpl.data.decode('utf-8-sig')
+
+    hcmc_points = client.get('/api/datasets/hcmc10').json['points']
+    p0, p1 = hcmc_points[0], hcmc_points[1]
+
+    # Hỗ trợ CSV có cả dòng chỉ nhập địa chỉ (thiếu lat/lon) và dòng có sẵn tọa độ
+    csv_payload = (
+        'role,name,address,lat,lon,demand,service_minutes,window_start,window_end,vehicles,capacity\n'
+        f'depot,Kho A,"140 Lê Trọng Tấn, Tân Phú",{p0["lat"]},{p0["lon"]},0,0,,,2,80\n'
+        'customer,Chợ Bến Thành,"Chợ Bến Thành, Quận 1",,,12,5,08:00,11:30,,\n'
+        f'customer,Khách C,"268 Lý Thường Kiệt, Q.10",{p1["lat"]},{p1["lon"]},8,10,,,,\n'
+    )
+    res = client.post('/api/custom-points/parse-csv', json={
+        'dataset': 'hcmc10',
+        'csv_text': csv_payload,
+    })
+    assert res.status_code == 200, res.json
+    data = res.json
+    assert data['vehicles'] == 2
+    assert data['capacity'] == 80.0
+    assert data['depot']['needs_geocode'] is False
+    assert data['depot']['snap_status'] == 'auto'
+    assert data['geocode_count'] == 1
+    assert data['snapped_count'] == 2
+    assert data['customers'][0]['name'] == 'Chợ Bến Thành'
+    assert data['customers'][0]['needs_geocode'] is True
+    assert data['customers'][0]['lat'] is None
+    assert data['customers'][0]['time_window'] == [28800.0, 41400.0]
+    assert data['customers'][1]['needs_geocode'] is False
+    assert data['customers'][1]['service_time'] == 600.0
+
+    # Hỗ trợ upload file kiểu Excel tiếng Việt (dấu ; và UTF-8 BOM + tên cột tiếng Việt)
+    excel_csv = (
+        '\ufeffloai;ten;dia_chi;vi_do;kinh_do;khoi_luong;phuc_vu_phut\n'
+        'kho;Kho trung tâm;140 Lê Trọng Tấn, Tân Phú;;;\n'
+        'khach;Landmark 81;Landmark 81, Bình Thạnh;;;5;7\n'
+    ).encode('utf-8')
+    upload = client.post(
+        '/api/custom-points/parse-csv',
+        data={'dataset': 'hcmc10', 'file': (BytesIO(excel_csv), 'diem_giao.csv')},
+        content_type='multipart/form-data',
+    )
+    assert upload.status_code == 200, upload.json
+    assert upload.json['geocode_count'] == 2
+    assert upload.json['customers'][0]['service_time'] == 420.0
+
+    # Bắt buộc phải có cột address / giá trị address
+    missing_addr_row = 'role,name,address\ndepot,Kho,\ncustomer,A,Chợ Bến Thành\n'
+    bad1 = client.post('/api/custom-points/parse-csv', json={'dataset': 'hcmc10', 'csv_text': missing_addr_row})
+    assert bad1.status_code == 400
+    assert 'address' in bad1.json['error']
+
+    no_addr_col = 'role,name,lat,lon\ndepot,Kho,10.79,106.65\ncustomer,A,10.78,106.66\n'
+    bad2 = client.post('/api/custom-points/parse-csv', json={'dataset': 'hcmc10', 'csv_text': no_addr_col})
+    assert bad2.status_code == 400
+
+    # Kiểm tra /api/geocode hỗ trợ tìm theo name + address khi nhập tên địa điểm POI
+    def fake_urlopen_poi(request, timeout):
+        payload = {'features': [{
+            'geometry': {'type': 'Point', 'coordinates': [p1['lon'], p1['lat']]},
+            'properties': {
+                'name': 'Landmark 81',
+                'street': 'Nguyễn Hữu Cảnh',
+                'locality': 'Phường 22',
+                'district': 'Bình Thạnh',
+                'city': 'Hồ Chí Minh',
+            },
+        }]}
+        return BytesIO(json.dumps(payload).encode())
+
+    backend.geocode_address.cache_clear()
+    monkeypatch.setattr(backend, 'GEOCODE_LAST_REQUEST', 0.0)
+    monkeypatch.setattr(backend, 'urlopen', fake_urlopen_poi)
+    poi_res = client.post('/api/geocode', json={
+        'dataset': 'hcmc10',
+        'name': 'Landmark 81',
+        'address': 'Landmark 81, Bình Thạnh',
+    })
+    assert poi_res.status_code == 200
+    assert poi_res.json['requires_confirmation'] is False
+    assert poi_res.json['result']['road_lat'] is not None
+
+
+def test_soft_delete_and_restore_routes_trips_and_jobs(client, monkeypatch):
+    monkeypatch.setattr(backend.EXECUTOR, 'submit', lambda *args, **kwargs: None)
+    second = client.post('/api/drivers', json={
+        'username': 'driver_soft', 'password': 'driver-soft-pass',
+    }).json['driver']
+
+    created_one = client.post('/api/runs', json={
+        'dataset': 'hcmc10', 'algorithms': ['HCMC-TD-ERAPO'],
+        'population_size': 4, 'budget': 8, 'seed': 42,
+    })
+    job_one = created_one.json['id']
+    write_completed_job(job_one, [
+        {'vehicle': 1, 'visits': [0, 1, 2, 0]},
+        {'vehicle': 2, 'visits': [0, 3, 4, 0]},
+    ])
+    backend.JOBS[job_one]['status'] = 'completed'
+
+    created_two = client.post('/api/runs', json={
+        'dataset': 'hcmc10', 'algorithms': ['HCMC-TD-ERAPO'],
+        'population_size': 4, 'budget': 8, 'seed': 43,
+    })
+    assert created_two.status_code == 202
+    job_two = created_two.json['id']
+    write_completed_job(job_two, [
+        {'vehicle': 1, 'visits': [0, 5, 0]},
+    ])
+    backend.JOBS[job_two]['status'] = 'completed'
+
+    # Giao Xe 1 cho driver_test (id=2), để Xe 2 chưa phân công
+    assigned = client.post('/api/trips', json={
+        'job_id': job_one, 'algorithm': 'HCMC-TD-ERAPO', 'route_index': 0, 'driver_id': 2,
+    })
+    assert assigned.status_code == 201
+    trip_id = assigned.json['trip']['id']
+
+    # Driver không có quyền xoá mềm
+    client.post('/api/auth/logout')
+    client.post('/api/auth/login', json={'username': 'driver_test', 'password': 'driver-pass-123'})
+    assert client.post('/api/routes/soft-delete', json={'job_id': job_one, 'route_index': 1}).status_code == 403
+    assert client.post('/api/trips/soft-delete-all').status_code == 403
+    assert client.delete(f'/api/trips/{trip_id}').status_code == 403
+    assert client.patch(f'/api/trips/{trip_id}/status', json={'status': 'in_progress'}).status_code == 200
+    assert client.patch(f'/api/trips/{trip_id}/stops/0').status_code == 200
+
+    # Admin xoá mềm tuyến chưa phân công (route_index=1 của job_one)
+    client.post('/api/auth/logout')
+    client.post('/api/auth/login', json={'username': 'admin_test', 'password': 'admin-pass-123'})
+    sd_unassigned = client.post('/api/routes/soft-delete', json={'job_id': job_one, 'route_index': 1})
+    assert sd_unassigned.status_code == 200
+    listed = client.get('/api/trips').json
+    job1_active = next(j for j in listed['jobs'] if j['job_id'] == job_one)
+    assert [r['route_index'] for r in job1_active['plan']['routes_summary']] == [0]
+    job1_trash = next(j for j in listed['deleted_jobs'] if j['job_id'] == job_one)
+    assert [r['route_index'] for r in job1_trash['plan']['routes_summary']] == [1]
+
+    # Không thể gán tài xế cho tuyến đang bị xoá mềm
+    assign_deleted = client.post('/api/trips', json={
+        'job_id': job_one, 'algorithm': 'HCMC-TD-ERAPO', 'route_index': 1, 'driver_id': second['id'],
+    })
+    assert assign_deleted.status_code == 409
+
+    # Xoá mềm tuyến đã giao (trip_id): biến mất khỏi danh sách của Driver và bị chặn thao tác
+    sd_trip = client.delete(f'/api/trips/{trip_id}')
+    assert sd_trip.status_code == 200
+    assert sd_trip.json['trip']['deleted_at'] is not None
+    listed_after = client.get('/api/trips').json
+    assert listed_after['trips'] == []
+    assert all(j['job_id'] != job_one for j in listed_after['jobs'])
+    assert listed_after['deleted_routes_count'] == 2
+
+    # Driver stats loại bỏ chuyến đã xoá mềm, nhưng vẫn chặn xóa user để bảo toàn lịch sử
+    driver_stats = next(d for d in client.get('/api/drivers').json['drivers'] if d['id'] == 2)
+    assert driver_stats['trips_total'] == 0
+    assert client.delete('/api/drivers/2').status_code == 409
+
+    client.post('/api/auth/logout')
+    client.post('/api/auth/login', json={'username': 'driver_test', 'password': 'driver-pass-123'})
+    assert client.get('/api/trips').json['trips'] == []
+    assert client.get(f'/api/trips/{trip_id}').status_code == 404
+    assert client.patch(f'/api/trips/{trip_id}/stops/1').status_code == 404
+
+    # Admin khôi phục chuyến trip_id -> giữ nguyên tiến độ stop 0 đã giao và ẩn khỏi thùng rác
+    client.post('/api/auth/logout')
+    client.post('/api/auth/login', json={'username': 'admin_test', 'password': 'admin-pass-123'})
+    restored = client.post(f'/api/trips/{trip_id}/restore')
+    assert restored.status_code == 200
+    assert restored.json['trip']['deleted_at'] is None
+    listed_restored = client.get('/api/trips').json
+    assert len(listed_restored['trips']) == 1
+    assert listed_restored['trips'][0]['stops_completed'] == 1
+    assert listed_restored['deleted_routes_count'] == 1
+
+    # Xoá mềm cả chuyến job_one rồi khôi phục riêng route_index=0 -> route 1 vẫn ở thùng rác
+    assert client.delete(f'/api/jobs/{job_one}').status_code == 200
+    assert client.get(f'/api/runs/{job_one}').json['deleted'] is True
+    assert client.post('/api/routes/restore', json={'job_id': job_one, 'route_index': 0}).status_code == 200
+    partial = client.get('/api/trips').json
+    assert [r['route_index'] for r in next(j for j in partial['jobs'] if j['job_id'] == job_one)['plan']['routes_summary']] == [0]
+    assert [r['route_index'] for r in next(j for j in partial['deleted_jobs'] if j['job_id'] == job_one)['plan']['routes_summary']] == [1]
+
+    # Khôi phục cả chuyến job_one -> mọi route của job_one quay lại active
+    assert client.post(f'/api/jobs/{job_one}/restore').status_code == 200
+    assert client.get(f'/api/runs/{job_one}').json['deleted'] is False
+    full_restored = client.get('/api/trips').json
+    assert [r['route_index'] for r in next(j for j in full_restored['jobs'] if j['job_id'] == job_one)['plan']['routes_summary']] == [0, 1]
+
+    # Xoá mềm tất cả & khôi phục tất cả
+    sd_all = client.post('/api/trips/soft-delete-all')
+    assert sd_all.status_code == 200
+    after_all = client.get('/api/trips').json
+    assert after_all['jobs'] == []
+    assert after_all['trips'] == []
+    assert after_all['deleted_routes_count'] == 3
+    assert {j['job_id'] for j in after_all['deleted_jobs']} == {job_one, job_two}
+
+    rs_all = client.post('/api/trips/restore-all')
+    assert rs_all.status_code == 200
+    after_rs_all = client.get('/api/trips').json
+    assert len(after_rs_all['jobs']) == 2
+    assert after_rs_all['deleted_routes_count'] == 0
 

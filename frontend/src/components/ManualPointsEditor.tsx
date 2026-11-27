@@ -1,11 +1,16 @@
+import { useRef } from "react"
 import {
+  CheckCheckIcon,
   CrosshairIcon,
+  DownloadIcon,
   EyeIcon,
+  FileSpreadsheetIcon,
   Loader2Icon,
   MapPinIcon,
   PlusIcon,
   SearchIcon,
   Trash2Icon,
+  UploadIcon,
 } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
@@ -120,6 +125,10 @@ function GeocodeFeedback({
 
 interface ManualPointsEditorProps {
   disabled: boolean
+  csvMode?: boolean
+  csvImporting: boolean
+  csvFileName: string | null
+  csvSummary: string | null
   manualVehicles: string
   manualCapacity: string
   manualServiceMinutes: string
@@ -133,6 +142,7 @@ interface ManualPointsEditorProps {
   onDepotAddressInput: (address: string) => void
   onDepotCoordInput: (field: "lat" | "lon", value: string) => void
   onResolveDepot: () => void
+  onAutoResolveDepot?: () => void
   onSelectDepotCandidate: (candidate: GeocodeCandidate) => void
   onPickDepotOnMap: () => void
   onAddPoint: () => void
@@ -141,13 +151,21 @@ interface ManualPointsEditorProps {
   onPointAddressInput: (uid: string, address: string) => void
   onPointCoordInput: (uid: string, field: "lat" | "lon", value: string) => void
   onResolvePoint: (uid: string) => void
+  onAutoResolvePoint?: (uid: string) => void
   onSelectPointCandidate: (uid: string, candidate: GeocodeCandidate) => void
   onPickPointOnMap: (uid: string, index: number) => void
   onPreviewPoints: () => void
+  onImportCsv: (file: File) => void
+  onDownloadCsvTemplate: () => void
+  onConfirmAllSuggested: () => void
 }
 
 export function ManualPointsEditor({
   disabled,
+  csvMode = false,
+  csvImporting,
+  csvFileName,
+  csvSummary,
   manualVehicles,
   manualCapacity,
   manualServiceMinutes,
@@ -161,6 +179,7 @@ export function ManualPointsEditor({
   onDepotAddressInput,
   onDepotCoordInput,
   onResolveDepot,
+  onAutoResolveDepot,
   onSelectDepotCandidate,
   onPickDepotOnMap,
   onAddPoint,
@@ -169,14 +188,109 @@ export function ManualPointsEditor({
   onPointAddressInput,
   onPointCoordInput,
   onResolvePoint,
+  onAutoResolvePoint,
   onSelectPointCandidate,
   onPickPointOnMap,
   onPreviewPoints,
+  onImportCsv,
+  onDownloadCsvTemplate,
+  onConfirmAllSuggested,
 }: ManualPointsEditorProps) {
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const unconfirmedSuggestedCount = [depot, ...points].filter(
+    (item) =>
+      Boolean(item.warning) &&
+      !item.snapConfirmed &&
+      item.lat.trim() !== "" &&
+      item.lon.trim() !== "" &&
+      item.snapStatus !== "rejected"
+  ).length
+
   return (
     <div className="flex flex-col gap-3 rounded-lg border border-border bg-muted/30 p-3">
+      <div
+        className={`flex flex-col gap-2 rounded-lg border p-2.5 ${
+          csvMode
+            ? "border-primary/50 bg-primary/5"
+            : "border-border bg-card"
+        }`}
+      >
+        <div className="flex items-center justify-between gap-2">
+          <span className="flex items-center gap-1.5 text-xs font-semibold">
+            <FileSpreadsheetIcon className="size-3.5 text-primary" />
+            Nhập từ 1 file CSV
+          </span>
+          {csvFileName && (
+            <Badge variant="secondary" className="max-w-[140px] truncate text-[10px]">
+              {csvFileName}
+            </Badge>
+          )}
+        </div>
+        <p className="text-[11px] leading-relaxed text-muted-foreground">
+          Cột <code className="font-mono">address</code> (địa chỉ hoặc tên địa điểm) bắt buộc nhập;
+          cột <code className="font-mono">lat, lon</code> có thể bỏ trống để hệ thống tự tìm tọa độ và chấm lên bản đồ.
+        </p>
+
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".csv,text/csv"
+          className="hidden"
+          onChange={(e) => {
+            const file = e.target.files?.[0]
+            e.target.value = ""
+            if (file) onImportCsv(file)
+          }}
+        />
+
+        <div className="grid grid-cols-2 gap-1.5">
+          <Button
+            type="button"
+            variant="default"
+            size="xs"
+            disabled={disabled || csvImporting}
+            onClick={() => fileInputRef.current?.click()}
+          >
+            {csvImporting ? (
+              <Loader2Icon data-icon="inline-start" className="animate-spin" />
+            ) : (
+              <UploadIcon data-icon="inline-start" />
+            )}
+            {csvImporting ? "Đang dò địa chỉ…" : "Chọn file CSV"}
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="xs"
+            disabled={disabled || csvImporting}
+            onClick={onDownloadCsvTemplate}
+          >
+            <DownloadIcon data-icon="inline-start" />
+            Tải CSV mẫu
+          </Button>
+        </div>
+
+        {csvSummary && (
+          <p className="text-[11px] font-medium text-foreground">{csvSummary}</p>
+        )}
+
+        {unconfirmedSuggestedCount > 0 && (
+          <Button
+            type="button"
+            variant="secondary"
+            size="xs"
+            disabled={disabled || csvImporting}
+            onClick={onConfirmAllSuggested}
+            className="w-full"
+          >
+            <CheckCheckIcon data-icon="inline-start" />
+            Xác nhận tất cả điểm gợi ý ({unconfirmedSuggestedCount})
+          </Button>
+        )}
+      </div>
+
       <p className="text-xs text-muted-foreground">
-        Tọa độ gần road graph TP.HCM sẽ được tự động ghép vào nút giao thông gần nhất.
+        Tọa độ gần road graph TP.HCM sẽ được tự động ghép vào nút giao thông gần nhất. Nhập tên địa điểm hoặc địa chỉ rồi nhấn Enter / rời ô để tự dò và chấm lên bản đồ.
       </p>
 
       <div className="grid grid-cols-3 gap-2">
@@ -261,10 +375,17 @@ export function ManualPointsEditor({
               id="depot-address"
               type="text"
               maxLength={300}
-              placeholder="140 Lê Trọng Tấn, Tân Phú, TP.HCM"
+              placeholder="Địa chỉ hoặc tên địa điểm (VD: 140 Lê Trọng Tấn, Tân Phú)"
               value={depot.address}
               onChange={(e) => onDepotAddressInput(e.target.value)}
-              disabled={disabled}
+              onBlur={() => onAutoResolveDepot?.()}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault()
+                  onResolveDepot()
+                }
+              }}
+              disabled={disabled || csvImporting}
             />
             <Button
               type="button"
@@ -380,10 +501,17 @@ export function ManualPointsEditor({
                 <Input
                   type="text"
                   maxLength={300}
-                  placeholder="Số nhà, đường, phường/quận, TP.HCM"
+                  placeholder="Địa chỉ hoặc tên địa điểm (VD: Chợ Bến Thành, Q.1)"
                   value={point.address}
                   onChange={(e) => onPointAddressInput(point.uid, e.target.value)}
-                  disabled={disabled}
+                  onBlur={() => onAutoResolvePoint?.(point.uid)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault()
+                      onResolvePoint(point.uid)
+                    }
+                  }}
+                  disabled={disabled || csvImporting}
                 />
                 <Button
                   type="button"

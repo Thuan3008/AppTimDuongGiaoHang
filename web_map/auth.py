@@ -112,7 +112,25 @@ def _ensure_trip_schema(db: sqlite3.Connection) -> None:
 
         CREATE INDEX IF NOT EXISTS idx_trips_driver ON trips(driver_id, created_at DESC);
         CREATE INDEX IF NOT EXISTS idx_trip_stops_trip ON trip_stops(trip_id, stop_index);
+
+        CREATE TABLE IF NOT EXISTS soft_deleted_jobs (
+            job_id TEXT PRIMARY KEY,
+            deleted_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS soft_deleted_routes (
+            job_id TEXT NOT NULL,
+            route_index INTEGER NOT NULL CHECK (route_index >= 0),
+            deleted_at TEXT NOT NULL,
+            PRIMARY KEY (job_id, route_index)
+        );
         """
+    )
+    trip_columns = {row[1] for row in db.execute("PRAGMA table_info(trips)").fetchall()}
+    if trip_columns and "deleted_at" not in trip_columns:
+        db.execute("ALTER TABLE trips ADD COLUMN deleted_at TEXT")
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_trips_deleted ON trips(deleted_at, created_at DESC)"
     )
     legacy_exists = db.execute(
         "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'trips_legacy'"
@@ -271,7 +289,7 @@ def list_drivers(*, include_inactive: bool = False) -> list[dict]:
             SUM(CASE WHEN t.status IN ('assigned', 'in_progress') THEN 1 ELSE 0 END) AS trips_active,
             SUM(CASE WHEN t.status = 'completed' THEN 1 ELSE 0 END) AS trips_completed
         FROM users u
-        LEFT JOIN trips t ON t.driver_id = u.id
+        LEFT JOIN trips t ON t.driver_id = u.id AND t.deleted_at IS NULL
         WHERE u.role = 'driver' {active_filter}
         GROUP BY u.id
         ORDER BY u.active DESC, u.created_at DESC, u.username ASC
@@ -309,7 +327,7 @@ def driver_by_id(driver_id: int) -> dict | None:
             SUM(CASE WHEN t.status IN ('assigned', 'in_progress') THEN 1 ELSE 0 END) AS trips_active,
             SUM(CASE WHEN t.status = 'completed' THEN 1 ELSE 0 END) AS trips_completed
         FROM users u
-        LEFT JOIN trips t ON t.driver_id = u.id
+        LEFT JOIN trips t ON t.driver_id = u.id AND t.deleted_at IS NULL
         WHERE u.id = ? AND u.role = 'driver'
         GROUP BY u.id
         """,
@@ -371,9 +389,13 @@ def delete_driver(driver_id: int) -> None:
     existing = driver_by_id(driver_id)
     if existing is None:
         raise LookupError("Không tìm thấy tài khoản tài xế")
-    if existing["trips_total"] > 0:
-        raise ValueError("Không thể xóa tài xế đã có lịch sử chuyến giao; hãy tạm khóa tài khoản thay vì xóa")
     db = get_db()
+    has_any_trip = db.execute(
+        "SELECT 1 FROM trips WHERE driver_id = ? LIMIT 1",
+        (driver_id,),
+    ).fetchone()
+    if existing["trips_total"] > 0 or has_any_trip is not None:
+        raise ValueError("Không thể xóa tài xế đã có lịch sử chuyến giao; hãy tạm khóa tài khoản thay vì xóa")
     db.execute("DELETE FROM users WHERE id = ? AND role = 'driver'", (driver_id,))
     db.commit()
 
@@ -405,16 +427,93 @@ def create_trip(
         raise ValueError("Route này đã được giao cho Driver") from error
 
 
+_TRIP_SELECT = """
+SELECT
+    t.*,
+    COALESCE(t.deleted_at, j.deleted_at, r.deleted_at) AS effective_deleted_at,
+    d.username AS driver_username,
+    d.full_name AS driver_full_name,
+    a.username AS admin_username
+FROM trips t
+JOIN users d ON d.id = t.driver_id
+JOIN users a ON a.id = t.created_by
+LEFT JOIN soft_deleted_jobs j ON j.job_id = t.job_id
+LEFT JOIN soft_deleted_routes r ON r.job_id = t.job_id AND r.route_index = t.route_index
+"""
+
+_ACTIVE_TRIP_FILTER = "COALESCE(t.deleted_at, j.deleted_at, r.deleted_at) IS NULL"
+
+
+def is_trip_deleted(row) -> bool:
+    """Return True if a trip row or its parent route/job has been soft-deleted."""
+    if row is None:
+        return False
+    if "effective_deleted_at" in row.keys():
+        return row["effective_deleted_at"] is not None
+    return row["deleted_at"] is not None
+
+
+def is_job_deleted(job_id: str) -> bool:
+    """Return True if the entire optimization job was soft-deleted."""
+    return (
+        get_db()
+        .execute("SELECT 1 FROM soft_deleted_jobs WHERE job_id = ?", (job_id,))
+        .fetchone()
+        is not None
+    )
+
+
+def is_route_deleted(job_id: str, route_index: int) -> bool:
+    """Return True if the job or route_index (or an assigned trip for it) is soft-deleted."""
+    db = get_db()
+    if is_job_deleted(job_id):
+        return True
+    if (
+        db.execute(
+            "SELECT 1 FROM soft_deleted_routes WHERE job_id = ? AND route_index = ?",
+            (job_id, route_index),
+        ).fetchone()
+        is not None
+    ):
+        return True
+    return (
+        db.execute(
+            "SELECT 1 FROM trips WHERE job_id = ? AND route_index = ? AND deleted_at IS NOT NULL",
+            (job_id, route_index),
+        ).fetchone()
+        is not None
+    )
+
+
+def list_soft_deleted_markers() -> tuple[dict[str, str], dict[tuple[str, int], str]]:
+    """Return soft-deleted job and route timestamp lookup tables."""
+    db = get_db()
+    deleted_jobs = {
+        row["job_id"]: row["deleted_at"]
+        for row in db.execute("SELECT job_id, deleted_at FROM soft_deleted_jobs").fetchall()
+    }
+    deleted_routes = {
+        (row["job_id"], int(row["route_index"])): row["deleted_at"]
+        for row in db.execute(
+            "SELECT job_id, route_index, deleted_at FROM soft_deleted_routes"
+        ).fetchall()
+    }
+    return deleted_jobs, deleted_routes
+
+
 def trip_by_id(trip_id: str):
     return get_db().execute(
-        "SELECT t.*, d.username AS driver_username, d.full_name AS driver_full_name, a.username AS admin_username "
-        "FROM trips t JOIN users d ON d.id = t.driver_id JOIN users a ON a.id = t.created_by "
-        "WHERE t.id = ?",
+        f"{_TRIP_SELECT} WHERE t.id = ?",
         (trip_id,),
     ).fetchone()
 
 
 def trip_payload(row) -> dict:
+    deleted_at = (
+        row["effective_deleted_at"]
+        if "effective_deleted_at" in row.keys()
+        else row["deleted_at"]
+    )
     return {
         "id": row["id"],
         "job_id": row["job_id"],
@@ -428,19 +527,181 @@ def trip_payload(row) -> dict:
         "status": row["status"],
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
+        "deleted_at": deleted_at,
     }
 
 
-def list_trips_for_user(user) -> list[dict]:
-    where = "" if user["role"] == "admin" else "WHERE t.driver_id = ?"
-    parameters = () if user["role"] == "admin" else (int(user["id"]),)
+def list_trips_for_user(user, *, include_deleted: bool = False) -> list[dict]:
+    conditions: list[str] = []
+    parameters: list[object] = []
+    if user["role"] != "admin":
+        conditions.append("t.driver_id = ?")
+        parameters.append(int(user["id"]))
+        conditions.append(_ACTIVE_TRIP_FILTER)
+    elif not include_deleted:
+        conditions.append(_ACTIVE_TRIP_FILTER)
+    where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
     rows = get_db().execute(
-        "SELECT t.*, d.username AS driver_username, d.full_name AS driver_full_name, a.username AS admin_username "
-        "FROM trips t JOIN users d ON d.id = t.driver_id JOIN users a ON a.id = t.created_by "
-        f"{where} ORDER BY t.created_at DESC",
+        f"{_TRIP_SELECT} {where} ORDER BY t.created_at DESC",
         parameters,
     ).fetchall()
     return [trip_payload(row) for row in rows]
+
+
+def soft_delete_route(job_id: str, route_index: int) -> str:
+    """Soft-delete a route slot and any assigned trip associated with it."""
+    now = utc_now()
+    db = get_db()
+    db.execute(
+        "INSERT INTO soft_deleted_routes(job_id, route_index, deleted_at) VALUES (?, ?, ?) "
+        "ON CONFLICT(job_id, route_index) DO UPDATE SET deleted_at = excluded.deleted_at",
+        (job_id, route_index, now),
+    )
+    db.execute(
+        "UPDATE trips SET deleted_at = COALESCE(deleted_at, ?), updated_at = ? "
+        "WHERE job_id = ? AND route_index = ?",
+        (now, now, job_id, route_index),
+    )
+    db.commit()
+    return now
+
+
+def restore_route(
+    job_id: str,
+    route_index: int,
+    all_route_indices: list[int] | None = None,
+) -> None:
+    """Restore a soft-deleted route; preserves sibling soft-deletes if parent job was deleted."""
+    now = utc_now()
+    db = get_db()
+    job_row = db.execute(
+        "SELECT deleted_at FROM soft_deleted_jobs WHERE job_id = ?",
+        (job_id,),
+    ).fetchone()
+    if job_row is not None:
+        job_deleted_at = job_row["deleted_at"]
+        db.execute("DELETE FROM soft_deleted_jobs WHERE job_id = ?", (job_id,))
+        known_indices = set(all_route_indices or [])
+        trip_indices = db.execute(
+            "SELECT route_index FROM trips WHERE job_id = ?",
+            (job_id,),
+        ).fetchall()
+        known_indices.update(int(item["route_index"]) for item in trip_indices)
+        for other_index in known_indices:
+            if other_index != route_index:
+                db.execute(
+                    "INSERT OR IGNORE INTO soft_deleted_routes(job_id, route_index, deleted_at) "
+                    "VALUES (?, ?, ?)",
+                    (job_id, other_index, job_deleted_at),
+                )
+    db.execute(
+        "DELETE FROM soft_deleted_routes WHERE job_id = ? AND route_index = ?",
+        (job_id, route_index),
+    )
+    db.execute(
+        "UPDATE trips SET deleted_at = NULL, updated_at = ? WHERE job_id = ? AND route_index = ?",
+        (now, job_id, route_index),
+    )
+    db.commit()
+
+
+def soft_delete_trip(trip_id: str) -> dict:
+    """Soft-delete an assigned trip and its route slot."""
+    row = trip_by_id(trip_id)
+    if row is None:
+        raise LookupError("Không tìm thấy chuyến giao hàng")
+    soft_delete_route(row["job_id"], int(row["route_index"]))
+    return trip_payload(trip_by_id(trip_id))
+
+
+def restore_trip(trip_id: str, all_route_indices: list[int] | None = None) -> dict:
+    """Restore a soft-deleted assigned trip and its route slot."""
+    row = trip_by_id(trip_id)
+    if row is None:
+        raise LookupError("Không tìm thấy chuyến giao hàng")
+    restore_route(row["job_id"], int(row["route_index"]), all_route_indices)
+    return trip_payload(trip_by_id(trip_id))
+
+
+def soft_delete_job(job_id: str) -> str:
+    """Soft-delete an entire optimization job and all of its assigned trips."""
+    now = utc_now()
+    db = get_db()
+    db.execute(
+        "INSERT INTO soft_deleted_jobs(job_id, deleted_at) VALUES (?, ?) "
+        "ON CONFLICT(job_id) DO UPDATE SET deleted_at = excluded.deleted_at",
+        (job_id, now),
+    )
+    db.execute(
+        "UPDATE trips SET deleted_at = COALESCE(deleted_at, ?), updated_at = ? WHERE job_id = ?",
+        (now, now, job_id),
+    )
+    db.commit()
+    return now
+
+
+def restore_job(job_id: str) -> None:
+    """Restore an entire optimization job and all soft-deleted routes/trips inside it."""
+    now = utc_now()
+    db = get_db()
+    db.execute("DELETE FROM soft_deleted_jobs WHERE job_id = ?", (job_id,))
+    db.execute("DELETE FROM soft_deleted_routes WHERE job_id = ?", (job_id,))
+    db.execute(
+        "UPDATE trips SET deleted_at = NULL, updated_at = ? WHERE job_id = ?",
+        (now, job_id),
+    )
+    db.commit()
+
+
+def soft_delete_all(job_ids: list[str]) -> dict[str, int]:
+    """Soft-delete all active optimization jobs and all active trips."""
+    now = utc_now()
+    db = get_db()
+    db_job_ids = {
+        row["job_id"]
+        for row in db.execute("SELECT DISTINCT job_id FROM trips").fetchall()
+    }
+    target_job_ids = sorted(set(job_ids) | db_job_ids)
+    jobs_marked = 0
+    for jid in target_job_ids:
+        existing = db.execute(
+            "SELECT 1 FROM soft_deleted_jobs WHERE job_id = ?",
+            (jid,),
+        ).fetchone()
+        if existing is None:
+            jobs_marked += 1
+            db.execute(
+                "INSERT INTO soft_deleted_jobs(job_id, deleted_at) VALUES (?, ?)",
+                (jid, now),
+            )
+    cursor = db.execute(
+        "UPDATE trips SET deleted_at = COALESCE(deleted_at, ?), updated_at = ? WHERE deleted_at IS NULL",
+        (now, now),
+    )
+    trips_marked = cursor.rowcount if cursor.rowcount is not None and cursor.rowcount >= 0 else 0
+    db.commit()
+    return {"deleted_jobs": jobs_marked, "deleted_trips": trips_marked}
+
+
+def restore_all_deleted() -> dict[str, int]:
+    """Restore every soft-deleted job, route slot, and assigned trip."""
+    now = utc_now()
+    db = get_db()
+    jobs_restored = db.execute("DELETE FROM soft_deleted_jobs").rowcount or 0
+    routes_restored = db.execute("DELETE FROM soft_deleted_routes").rowcount or 0
+    trips_restored = (
+        db.execute(
+            "UPDATE trips SET deleted_at = NULL, updated_at = ? WHERE deleted_at IS NOT NULL",
+            (now,),
+        ).rowcount
+        or 0
+    )
+    db.commit()
+    return {
+        "restored_jobs": max(0, jobs_restored),
+        "restored_routes": max(0, routes_restored),
+        "restored_trips": max(0, trips_restored),
+    }
 
 
 def list_trip_stops(trip_id: str) -> list[dict]:
@@ -464,7 +725,9 @@ def list_job_stops(job_id: str) -> list[dict]:
     rows = get_db().execute(
         "SELECT s.stop_index, s.customer_id, s.status, s.completed_at, t.route_index, t.id AS trip_id "
         "FROM trip_stops s JOIN trips t ON t.id = s.trip_id "
-        "WHERE t.job_id = ? ORDER BY t.route_index, s.stop_index",
+        "LEFT JOIN soft_deleted_jobs j ON j.job_id = t.job_id "
+        "LEFT JOIN soft_deleted_routes r ON r.job_id = t.job_id AND r.route_index = t.route_index "
+        f"WHERE t.job_id = ? AND {_ACTIVE_TRIP_FILTER} ORDER BY t.route_index, s.stop_index",
         (job_id,),
     ).fetchall()
     return [
@@ -481,6 +744,8 @@ def list_job_stops(job_id: str) -> list[dict]:
 
 
 def complete_trip_stop(row, stop_index: int, user) -> None:
+    if is_trip_deleted(row):
+        raise ValueError("Chuyến giao hàng này đã được xoá mềm")
     if user["role"] != "driver" or int(row["driver_id"]) != int(user["id"]):
         raise PermissionError("Điểm giao này không thuộc chuyến của tài xế hiện tại")
     db = get_db()
@@ -524,6 +789,8 @@ def complete_trip_stop(row, stop_index: int, user) -> None:
 
 
 def update_trip_status(row, new_status: str, user) -> None:
+    if is_trip_deleted(row):
+        raise ValueError("Chuyến hoặc tuyến này đã được xoá mềm; hãy khôi phục trước khi cập nhật trạng thái")
     current = row["status"]
     if new_status not in TRIP_STATUSES:
         raise ValueError("Trạng thái chuyến không hợp lệ")
@@ -549,6 +816,8 @@ def reassign_trip(trip_id: str, new_driver_id: int, user) -> dict:
     row = trip_by_id(trip_id)
     if row is None:
         raise LookupError("Không tìm thấy chuyến giao hàng")
+    if is_trip_deleted(row):
+        raise ValueError("Tuyến này đã được xoá mềm; hãy khôi phục trước khi điều chuyển tài xế")
     if row["status"] in ("completed", "cancelled"):
         raise ValueError("Không thể đổi tài xế cho chuyến đã hoàn tất hoặc đã huỷ")
     db = get_db()

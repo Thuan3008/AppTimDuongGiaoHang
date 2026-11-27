@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import csv
+import io
 import json
 import logging
 import math
+import os
 import random
 import re
 import statistics
@@ -25,7 +28,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from flask import Flask, abort, g, jsonify, request, send_file, session
+from flask import Flask, Response, abort, g, jsonify, request, send_file, session
 
 from algorithms.poryos_baseline_adapter import run_baseline
 from algorithms.rapo_2709 import RAPO2709Config, optimize
@@ -33,7 +36,7 @@ from algorithms.hcmc_td_erapo import HCMCTDERAPOConfig, optimize as run_hcmc_td_
 from core.data.load_instance import load_instance
 from core.data.load_road_graph import load_road_graph
 from core.data.load_traffic import load_traffic
-from core.data.load_poryos import load_poryos
+from core.data.load_poryos import load_poryos, resolve_poryos_sidecar_root
 from core.data.models import Customer, ProceduralTrafficOverlay
 from core.routing.fastest_path import prepare_adjacency
 from web_map.auth import (
@@ -45,13 +48,25 @@ from web_map.auth import (
     driver_exists,
     get_db,
     init_auth,
+    is_job_deleted,
+    is_route_deleted,
+    is_trip_deleted,
     list_drivers,
     list_job_stops,
+    list_soft_deleted_markers,
     list_trips_for_user,
     list_trip_stops,
     login_required,
     reassign_trip,
+    restore_all_deleted,
+    restore_job,
+    restore_route,
+    restore_trip,
     role_required,
+    soft_delete_all,
+    soft_delete_job,
+    soft_delete_route,
+    soft_delete_trip,
     trip_by_id,
     trip_payload,
     update_driver,
@@ -90,9 +105,17 @@ def add_no_cache_headers(response):
     response.headers['Pragma'] = 'no-cache'
     response.headers['Expires'] = '0'
     return response
-# GA dùng adapter có sẵn, cùng quần thể ban đầu và pipeline vẽ tuyến OSRM.
-ALGORITHMS = ('RAPO-2709', 'RAPO-Pufferfish', 'GA')
-ALGORITHM_LABELS = {'RAPO-2709': 'RAPO', 'HCMC-TD-ERAPO': 'HCMC-TD-ERAPO'}
+# Thuật toán đề xuất RAPO cùng các thuật toán đối chứng chính trong báo cáo.
+ALGORITHMS = ('RAPO-2709', 'ARO-Original', 'POA-Original', 'GA', 'GA-LS', 'Greedy')
+ALGORITHM_LABELS = {
+    'RAPO-2709': 'RAPO',
+    'ARO-Original': 'ARO-Original',
+    'POA-Original': 'POA-Original',
+    'GA': 'GA',
+    'GA-LS': 'GA-LS',
+    'Greedy': 'Greedy',
+    'HCMC-TD-ERAPO': 'HCMC-TD-ERAPO',
+}
 
 
 def algorithm_label(name: str) -> str:
@@ -100,16 +123,25 @@ def algorithm_label(name: str) -> str:
     return ALGORITHM_LABELS.get(name, name)
 
 
-DATASETS = {
-    f'hk{n}': ROOT / f'data/TDVRP/hong_kong/n={n}/poryos-hong_kong-n{n}-hyb/bpr-heavy/poryos-hong_kong-n{n}-hyb-bpr-heavy.vrp.json'
-    for n in (25, 50, 100)
-}
+PORYOS_CITY_SPECS = (
+    ('hk', 'hong_kong', 'Hong Kong', (25, 50, 100)),
+    ('paris', 'paris', 'Paris', (10, 25, 50)),
+    ('tokyo', 'tokyo', 'Tokyo', (10, 25, 50)),
+)
+PORYOS_CITY_NAMES = {prefix: label for prefix, _, label, _ in PORYOS_CITY_SPECS}
+
+DATASETS = {}
+for prefix, folder, _, sizes in PORYOS_CITY_SPECS:
+    for n in sizes:
+        DATASETS[f'{prefix}{n}'] = (
+            ROOT / f'data/TDVRP/{folder}/n={n}/poryos-{folder}-n{n}-hyb/bpr-heavy/poryos-{folder}-n{n}-hyb-bpr-heavy.vrp.json'
+        )
 DATASET_ALGORITHMS = {key: ALGORITHMS for key in DATASETS}
 for n in (10, 100, 500, 1000):
     DATASETS[f'hcmc{n}'] = ROOT / f'data/hcmc/instances/hcmc-n{n}-heavy.vrp.json'
     DATASET_ALGORITHMS[f'hcmc{n}'] = ('HCMC-TD-ERAPO',)
 OUTPUT = ROOT / 'results' / 'web_map'
-init_auth(app, OUTPUT / 'delivery-auth.sqlite3')
+init_auth(app, os.environ.get('RAPO_AUTH_DATABASE') or (OUTPUT / 'delivery-auth.sqlite3'))
 EXECUTOR = ThreadPoolExecutor(max_workers=1)
 JOBS: dict[str, dict] = {}
 JOB_LOCK = Lock()
@@ -143,17 +175,26 @@ HCMC_BBOX = (106.35, 10.35, 107.05, 11.20)
 NODE_INDEXES = {}
 
 
+def _poryos_fallback_roots(path: Path) -> tuple[Path, ...]:
+    return tuple(ancestor / 'MAMUT-routing-Poryos2026-main' for ancestor in path.parents)
+
+
 def sidecar_status(path):
     """Kiểm tra đủ cả hai sidecar trước khi cho chọn dataset."""
     if not path.is_file():
         return [str(path)]
     payload = json.loads(path.read_text(encoding='utf-8'))
+    fallbacks = _poryos_fallback_roots(path)
+    require_manifest = payload.get('benchmark_name') == 'Poryos2026'
     missing = []
     for key in ('graph', 'traffic'):
         relative = Path(payload['td'][key]['path'])
-        resolved = next((ancestor / relative for ancestor in path.parents
-                         if (ancestor / relative).is_file()), None)
-        if resolved is None:
+        if resolve_poryos_sidecar_root(
+            path,
+            relative,
+            fallback_roots=fallbacks,
+            require_manifest=require_manifest,
+        ) is None:
             missing.append(str(path.parent.parent / relative))
     return missing
 
@@ -227,7 +268,12 @@ def load_data(key, exact=False):
         graph, traffic, graph_path = _load_hcmc_network()
         instance = _snap_instance_to_graph(instance, graph, graph_path)
         return instance, graph, traffic
-    return load_poryos(DATASETS[key], verify_checksums=True,
+    path = DATASETS[key]
+    payload = json.loads(path.read_text(encoding='utf-8'))
+    col_root = resolve_poryos_sidecar_root(
+        path, payload['td']['graph']['path'], fallback_roots=_poryos_fallback_roots(path)
+    )
+    return load_poryos(path, collection_root=col_root, verify_checksums=True,
                        allow_proxy=False, materialize_atfs=exact)
 
 
@@ -325,6 +371,222 @@ def normalize_custom_points(value):
                    lat=depot_lat, lon=depot_lon,
                    snap_confirmed=depot.get('snap_confirmed') is True),
         num_vehicles=vehicles, vehicle_capacity=capacity, customers=normalized_customers,
+    )
+
+
+CSV_COLUMN_ALIASES = {
+    'role': 'role', 'loai': 'role', 'type': 'role', 'vai_tro': 'role',
+    'name': 'name', 'ten': 'name', 'ten_diem': 'name', 'ten_khach_hang': 'name',
+    'khach_hang': 'name', 'diem': 'name', 'ten_dia_diem': 'name',
+    'address': 'address', 'dia_chi': 'address', 'dia_diem': 'address',
+    'lat': 'lat', 'latitude': 'lat', 'vi_do': 'lat', 'vido': 'lat',
+    'lon': 'lon', 'lng': 'lon', 'long': 'lon', 'longitude': 'lon', 'kinh_do': 'lon', 'kinhdo': 'lon',
+    'demand': 'demand', 'khoi_luong': 'demand', 'nhu_cau': 'demand', 'tai': 'demand', 'weight': 'demand',
+    'service_minutes': 'service_minutes', 'phuc_vu_phut': 'service_minutes',
+    'phuc_vu': 'service_minutes', 'thoi_gian_phuc_vu': 'service_minutes',
+    'service_seconds': 'service_seconds',
+    'window_start': 'window_start', 'tu_gio': 'window_start', 'gio_bat_dau': 'window_start',
+    'window_end': 'window_end', 'den_gio': 'window_end', 'gio_ket_thuc': 'window_end',
+    'vehicles': 'vehicles', 'so_xe': 'vehicles', 'num_vehicles': 'vehicles',
+    'capacity': 'capacity', 'tai_trong': 'capacity', 'vehicle_capacity': 'capacity', 'suc_chua': 'capacity',
+}
+CSV_DEPOT_ROLES = {'depot', 'kho', 'k', 'warehouse'}
+CSV_CUSTOMER_ROLES = {'', 'customer', 'khach', 'khach_hang', 'diem_giao', 'stop', 'delivery'}
+
+
+def _build_csv_template() -> str:
+    buffer = io.StringIO()
+    writer = csv.writer(buffer, lineterminator='\r\n')
+    writer.writerow([
+        'role', 'name', 'address', 'lat', 'lon',
+        'demand', 'service_minutes', 'window_start', 'window_end',
+        'vehicles', 'capacity',
+    ])
+    writer.writerow(['depot', 'Kho Tân Phú', '140 Lê Trọng Tấn, Tân Phú, TP.HCM', '', '', '0', '0', '', '', '2', '100'])
+    writer.writerow(['customer', 'Đại học Bách Khoa', '268 Lý Thường Kiệt, Quận 10, TP.HCM', '', '', '15', '5', '08:00', '11:30', '', ''])
+    writer.writerow(['customer', 'Chợ Bến Thành', 'Chợ Bến Thành, Quận 1, TP.HCM', '', '', '20', '5', '08:30', '12:00', '', ''])
+    writer.writerow(['customer', 'Landmark 81', 'Landmark 81, Bình Thạnh, TP.HCM', '10.7950', '106.7218', '10', '5', '', '', '', ''])
+    return '\ufeff' + buffer.getvalue()
+
+
+def _normalize_csv_header(raw: str) -> str:
+    cleaned = _normalize_address_text(str(raw).lstrip('\ufeff')).replace('/', '_')
+    return re.sub(r'\s+', '_', cleaned).strip('_')
+
+
+def _parse_csv_number(raw: str, label: str, *, delimiter: str, minimum=None, maximum=None, positive=False) -> float:
+    text = raw.strip()
+    if delimiter == ';' and ',' in text and '.' not in text:
+        text = text.replace(',', '.')
+    try:
+        value = float(text)
+    except ValueError as error:
+        raise ValueError(f'{label} phải là số hợp lệ') from error
+    return _finite_number(value, label, minimum=minimum, maximum=maximum, positive=positive)
+
+
+def _parse_csv_clock(raw: str, label: str) -> float:
+    text = raw.strip()
+    match = re.fullmatch(r'(\d{1,2}):(\d{2})(?::(\d{2}))?', text)
+    if not match:
+        raise ValueError(f'{label} phải theo định dạng HH:MM (ví dụ 08:30)')
+    hours, minutes, seconds = int(match.group(1)), int(match.group(2)), int(match.group(3) or 0)
+    if hours > 48 or minutes >= 60 or seconds >= 60:
+        raise ValueError(f'{label} không phải mốc giờ hợp lệ')
+    total = float(hours * 3600 + minutes * 60 + seconds)
+    if total > 172800:
+        raise ValueError(f'{label} vượt quá giới hạn cho phép')
+    return total
+
+
+def parse_custom_points_csv(csv_text: str, graph, *, default_service_minutes: float = 5.0):
+    """Parse and validate a single CSV file containing depot and delivery points."""
+    cleaned_text = str(csv_text or '').lstrip('\ufeff').strip()
+    if not cleaned_text:
+        raise ValueError('File CSV đang rỗng')
+    first_line = cleaned_text.splitlines()[0]
+    delimiter = ';' if ';' in first_line and ',' not in first_line else ','
+    rows = list(csv.reader(io.StringIO(cleaned_text), delimiter=delimiter))
+    non_empty_rows = [(idx, row) for idx, row in enumerate(rows, 1) if any(cell.strip() for cell in row)]
+    if len(non_empty_rows) < 2:
+        raise ValueError('File CSV cần có dòng tiêu đề và ít nhất 2 dòng dữ liệu (kho + điểm giao)')
+
+    _, raw_headers = non_empty_rows[0]
+    mapped_headers = []
+    seen_canonical = set()
+    for header in raw_headers:
+        canonical = CSV_COLUMN_ALIASES.get(_normalize_csv_header(header))
+        if canonical and canonical in seen_canonical:
+            raise ValueError(f'Cột "{header.strip()}" bị lặp lại trong file CSV')
+        if canonical:
+            seen_canonical.add(canonical)
+        mapped_headers.append(canonical)
+    if 'address' not in seen_canonical:
+        raise ValueError('File CSV bắt buộc phải có cột address (hoặc dia_chi)')
+
+    has_role_col = 'role' in seen_canonical
+    node_index = _road_node_index(graph[0])
+    parsed_entries = []
+    vehicles = None
+    capacity = None
+    depot_count = 0
+
+    for data_pos, (line_no, raw_row) in enumerate(non_empty_rows[1:], 1):
+        record = {
+            canonical: (raw_row[col_idx].strip() if col_idx < len(raw_row) else '')
+            for col_idx, canonical in enumerate(mapped_headers)
+            if canonical is not None
+        }
+        address = record.get('address', '').strip()
+        if not address:
+            raise ValueError(f'Dòng {line_no}: cột địa chỉ (address) là bắt buộc, không được để trống')
+        if len(address) > 300:
+            raise ValueError(f'Dòng {line_no}: địa chỉ dài quá 300 ký tự')
+
+        if has_role_col:
+            role_raw = _normalize_address_text(record.get('role', '')).replace(' ', '_')
+            if role_raw in CSV_DEPOT_ROLES:
+                is_depot = True
+            elif role_raw in CSV_CUSTOMER_ROLES:
+                is_depot = False
+            else:
+                raise ValueError(f'Dòng {line_no}: giá trị cột role "{record.get("role", "")}" không hợp lệ (dùng depot/kho hoặc customer/khach)')
+        else:
+            is_depot = data_pos == 1
+
+        if is_depot:
+            depot_count += 1
+        label = 'kho' if is_depot else f'dòng {line_no}'
+
+        name = record.get('name', '').strip()
+        if len(name) > 100:
+            raise ValueError(f'Dòng {line_no}: tên địa điểm dài quá 100 ký tự')
+
+        if record.get('vehicles', '').strip():
+            v_num = _parse_csv_number(record['vehicles'], f'Số xe ({label})', delimiter=delimiter, minimum=1, maximum=50)
+            if not v_num.is_integer():
+                raise ValueError(f'Dòng {line_no}: số xe phải là số nguyên')
+            vehicles = int(v_num)
+        if record.get('capacity', '').strip():
+            capacity = _parse_csv_number(record['capacity'], f'Tải trọng ({label})', delimiter=delimiter, positive=True, maximum=1_000_000)
+
+        raw_lat = record.get('lat', '').strip()
+        raw_lon = record.get('lon', '').strip()
+        if bool(raw_lat) != bool(raw_lon):
+            raise ValueError(f'Dòng {line_no}: cần nhập đủ cả vĩ độ (lat) và kinh độ (lon), hoặc bỏ trống cả hai để tự tìm từ địa chỉ')
+
+        lat = lon = snap_distance_m = snap_status = warning = None
+        if raw_lat and raw_lon:
+            lat = _parse_csv_number(raw_lat, f'Vĩ độ ({label})', delimiter=delimiter, minimum=-90, maximum=90)
+            lon = _parse_csv_number(raw_lon, f'Kinh độ ({label})', delimiter=delimiter, minimum=-180, maximum=180)
+            node = node_index.nearest(lat, lon)
+            snap_distance_m = round(_distance_m(lat, lon, node.lat, node.lon), 1)
+            snap_status = _snap_policy(snap_distance_m)
+            if snap_status == 'confirm':
+                warning = f'Cách đường gần nhất {snap_distance_m:.1f} m; cần xác nhận.'
+            elif snap_status == 'rejected':
+                warning = f'Cách đường gần nhất {snap_distance_m:.1f} m, vượt giới hạn 300 m.'
+
+        if is_depot:
+            demand = 0.0
+            service_time = 0.0
+            time_window = None
+        else:
+            raw_demand = record.get('demand', '').strip()
+            demand = _parse_csv_number(raw_demand, f'Nhu cầu ({label})', delimiter=delimiter, positive=True, maximum=1_000_000) if raw_demand else 1.0
+            if record.get('service_minutes', '').strip():
+                mins = _parse_csv_number(record['service_minutes'], f'Thời gian phục vụ ({label})', delimiter=delimiter, minimum=0, maximum=1440)
+                service_time = mins * 60.0
+            elif record.get('service_seconds', '').strip():
+                service_time = _parse_csv_number(record['service_seconds'], f'Thời gian phục vụ giây ({label})', delimiter=delimiter, minimum=0, maximum=86400)
+            else:
+                service_time = float(default_service_minutes) * 60.0
+
+            raw_start = record.get('window_start', '').strip()
+            raw_end = record.get('window_end', '').strip()
+            if bool(raw_start) != bool(raw_end):
+                raise ValueError(f'Dòng {line_no}: khung giờ phải nhập đủ cả giờ bắt đầu và kết thúc')
+            time_window = None
+            if raw_start and raw_end:
+                start_sec = _parse_csv_clock(raw_start, f'Giờ bắt đầu ({label})')
+                end_sec = _parse_csv_clock(raw_end, f'Giờ kết thúc ({label})')
+                if start_sec >= end_sec:
+                    raise ValueError(f'Dòng {line_no}: giờ kết thúc phải sau giờ bắt đầu')
+                time_window = [start_sec, end_sec]
+
+        parsed_entries.append((is_depot, dict(
+            name=name, address=address, lat=lat, lon=lon,
+            snap_distance_m=snap_distance_m, snap_status=snap_status, warning=warning,
+            demand=demand, service_time=service_time, time_window=time_window,
+            needs_geocode=(lat is None or lon is None),
+        )))
+
+    if depot_count != 1:
+        raise ValueError('File CSV phải có đúng 1 dòng kho (role=depot hoặc kho)')
+    depot_item = next(item for is_depot, item in parsed_entries if is_depot)
+    if not depot_item['name']:
+        depot_item['name'] = 'Kho'
+    customers = [item for is_depot, item in parsed_entries if not is_depot]
+    if not customers:
+        raise ValueError('File CSV cần ít nhất 1 dòng điểm giao (customer)')
+    if len(customers) > 100:
+        raise ValueError('File CSV chỉ hỗ trợ tối đa 100 điểm giao mỗi chuyến')
+    for idx, item in enumerate(customers, 1):
+        if not item['name']:
+            item['name'] = f'Điểm giao {idx}'
+        if capacity is not None and item['demand'] > capacity + 1e-9:
+            raise ValueError(f'Nhu cầu của {item["name"]} ({item["demand"]:g}) vượt tải trọng xe ({capacity:g})')
+    if capacity is not None and vehicles is not None:
+        if sum(item['demand'] for item in customers) > vehicles * capacity + 1e-9:
+            raise ValueError('Tổng nhu cầu trong CSV vượt quá tổng tải trọng của các xe')
+
+    return dict(
+        depot=depot_item,
+        customers=customers,
+        vehicles=vehicles,
+        capacity=capacity,
+        geocode_count=sum(1 for item in [depot_item, *customers] if item['needs_geocode']),
+        snapped_count=sum(1 for item in [depot_item, *customers] if not item['needs_geocode']),
     )
 
 
@@ -460,7 +722,9 @@ def _fetch_geocode_provider(provider, url, provider_order, fallback_display, hea
                 continue
             properties = item.get('properties', {})
             address_parts = [properties.get(key) for key in (
-                'name', 'housenumber', 'street', 'district', 'city', 'country')]
+                'name', 'housenumber', 'street', 'locality', 'suburb',
+                'district', 'county', 'city', 'country',
+            )]
             display_name = ', '.join(dict.fromkeys(str(part) for part in address_parts if part))
             try:
                 lon, lat = map(float, coordinates[:2])
@@ -782,16 +1046,39 @@ def run_job(job_id, config):
             instance = build_custom_instance(instance, graph, config['custom_points'], config['trip_name'])
         customers = list(range(1, instance.num_customers + 1))
         osrm_available = True
-        # Mỗi seed có P0 riêng; các thuật toán ở cùng seed dùng đúng P0 đó.
-        schedule = [(seed, algorithm)
-                    for seed in range(config['seed'], config['seed'] + config.get('num_seeds', 1))
-                    for algorithm in config['algorithms']]
+        # Mỗi seed có P0 riêng; các thuật toán ngẫu nhiên cùng seed dùng đúng P0 đó.
+        # Greedy là thuật toán tất định nên chỉ chạy một lần.
+        seeds = list(range(config['seed'], config['seed'] + config.get('num_seeds', 1)))
+        populations = {}
+        schedule = []
+        greedy_scheduled = False
+        for seed in seeds:
+            for algorithm in config['algorithms']:
+                if algorithm == 'Greedy':
+                    if greedy_scheduled:
+                        continue
+                    greedy_scheduled = True
+                    schedule.append((None, 'Greedy'))
+                else:
+                    if seed not in populations:
+                        rng = random.Random(seed)
+                        populations[seed] = [
+                            tuple(rng.sample(customers, len(customers)))
+                            for _ in range(config['population_size'])
+                        ]
+                    schedule.append((seed, algorithm))
+        total_runs = len(schedule)
         for seed, algorithm in schedule:
-            rng = random.Random(seed)
-            population = [tuple(rng.sample(customers, len(customers))) for _ in range(config['population_size'])]
-            label = f'[{completed_runs + 1}/{total_runs}] {algorithm_label(algorithm)} · seed {seed}'
+            population = populations.get(seed)
+            run_label = 'tất định' if seed is None else f'seed {seed}'
+            label = f'[{completed_runs + 1}/{total_runs}] {algorithm_label(algorithm)} · {run_label}'
             try:
-                update_job(job_id, stage=f'{label}: đang tối ưu, ngân sách {config["budget"]} NFE',
+                stage_detail = (
+                    f'{label}: đang dựng nghiệm tất định'
+                    if algorithm == 'Greedy'
+                    else f'{label}: đang tối ưu, ngân sách {config["budget"]} NFE'
+                )
+                update_job(job_id, stage=stage_detail,
                            completed_runs=completed_runs, total_runs=total_runs)
                 algorithm_start = time.perf_counter()
                 if algorithm == 'RAPO-2709':
@@ -822,7 +1109,8 @@ def run_job(job_id, config):
                 else:
                     result = run_baseline(algorithm, instance, graph, traffic,
                         instance_path=DATASETS[config['dataset']], population_size=config['population_size'],
-                        nfe_budget=config['budget'], seed=seed, initial_population=population,
+                        nfe_budget=config['budget'], seed=0 if seed is None else seed,
+                        initial_population=population,
                         start_time=config['earliest_departure'],
                         latest_time=config.get('latest_departure'))
                 evaluation_seconds = time.perf_counter() - algorithm_start
@@ -849,15 +1137,17 @@ def run_job(job_id, config):
                     results[algorithm] = item
             except Exception as error:
                 LOG.exception('%s bị lỗi', label)
-                errors[f'{algorithm} · seed {seed}'] = str(error)
+                err_key = algorithm if seed is None else f'{algorithm} · seed {seed}'
+                errors[err_key] = str(error)
             completed_runs += 1
             update_job(job_id, completed_runs=completed_runs)
         # Chỉ tổng hợp các lượt thành công; ghi rõ số lỗi, SD mẫu cần ít nhất 2 seed.
         summary = {}
         for algorithm, items in runs.items():
+            expected_runs = 1 if algorithm == 'Greedy' else config.get('num_seeds', 1)
             fitnesses = [item['fitness'] for item in items]
             summary[algorithm] = dict(
-                completed=len(items), failed=config.get('num_seeds', 1) - len(items),
+                completed=len(items), failed=expected_runs - len(items),
                 best=min(fitnesses) if items else None,
                 mean=statistics.mean(fitnesses) if items else None,
                 median=statistics.median(fitnesses) if items else None,
@@ -1053,52 +1343,174 @@ def extract_plan_metadata(job_id: str, preferred_algorithm: str = None) -> dict:
     }
 
 
+def _is_valid_hex_id(value) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value) == 32
+        and all(ch in '0123456789abcdef' for ch in value)
+    )
+
+
+def _route_indices_for_job(job_id: str) -> list[int]:
+    meta = extract_plan_metadata(job_id)
+    return [int(r['route_index']) for r in meta.get('routes_summary', [])]
+
+
+def _job_exists(job_id: str) -> bool:
+    if (OUTPUT / f'{job_id}.json').is_file():
+        return True
+    with JOB_LOCK:
+        if job_id in JOBS:
+            return True
+    db = get_db()
+    return (
+        db.execute("SELECT 1 FROM trips WHERE job_id = ? LIMIT 1", (job_id,)).fetchone()
+        is not None
+        or is_job_deleted(job_id)
+    )
+
+
+def _enrich_trip_item(item: dict, active_statuses: dict, plan_metadata: dict) -> dict:
+    job_id = item['job_id']
+    if job_id not in plan_metadata:
+        plan_metadata[job_id] = extract_plan_metadata(job_id, item.get('algorithm'))
+    item['plan'] = plan_metadata[job_id]
+    job_status = active_statuses.get(job_id)
+    if job_status is None:
+        result_path = OUTPUT / f'{job_id}.json'
+        if result_path.is_file():
+            try:
+                job_status = 'completed' if json.loads(result_path.read_text(encoding='utf-8')).get('results') else 'failed'
+            except (OSError, ValueError):
+                job_status = 'failed'
+        else:
+            job_status = 'missing'
+    item['job_status'] = job_status
+    stops = list_trip_stops(item['id'])
+    item['stops_completed'] = sum(stop['status'] == 'completed' for stop in stops)
+    item['stops_total'] = len(stops)
+    return item
+
+
 @app.get('/api/trips')
 @login_required
 def trips():
-    items = list_trips_for_user(g.user)
     with JOB_LOCK:
         active_statuses = {job_id: job.get('status') for job_id, job in JOBS.items()}
     plan_metadata = {}
-    for item in items:
-        if item['job_id'] not in plan_metadata:
-            plan_metadata[item['job_id']] = extract_plan_metadata(item['job_id'], item.get('algorithm'))
-        item['plan'] = plan_metadata[item['job_id']]
-        job_status = active_statuses.get(item['job_id'])
-        if job_status is None:
-            result_path = OUTPUT / f"{item['job_id']}.json"
-            if result_path.is_file():
-                try:
-                    job_status = 'completed' if json.loads(result_path.read_text(encoding='utf-8')).get('results') else 'failed'
-                except (OSError, ValueError):
-                    job_status = 'failed'
-            else:
-                job_status = 'missing'
-        item['job_status'] = job_status
-        stops = list_trip_stops(item['id'])
-        item['stops_completed'] = sum(stop['status'] == 'completed' for stop in stops)
-        item['stops_total'] = len(stops)
+
+    if g.user['role'] != 'admin':
+        items = list_trips_for_user(g.user)
+        for item in items:
+            _enrich_trip_item(item, active_statuses, plan_metadata)
+        return jsonify(trips=items, jobs=None, deleted_jobs=None, deleted_routes_count=0)
+
+    all_trip_items = list_trips_for_user(g.user, include_deleted=True)
+    for item in all_trip_items:
+        _enrich_trip_item(item, active_statuses, plan_metadata)
+
+    deleted_jobs_map, deleted_routes_map = list_soft_deleted_markers()
+    known_job_ids = list(plan_metadata.keys())
+    if OUTPUT.is_dir():
+        for json_file in sorted(OUTPUT.glob('*.json'), key=lambda p: p.stat().st_mtime, reverse=True):
+            job_id = json_file.stem
+            if _is_valid_hex_id(job_id) and job_id not in plan_metadata:
+                meta = extract_plan_metadata(job_id)
+                if meta.get('total_routes', 0) > 0:
+                    plan_metadata[job_id] = meta
+                    known_job_ids.append(job_id)
+
+    active_items = [
+        item
+        for item in all_trip_items
+        if item.get('deleted_at') is None
+        and item['job_id'] not in deleted_jobs_map
+        and (item['job_id'], int(item['route_index'])) not in deleted_routes_map
+    ]
 
     admin_jobs = []
-    if g.user['role'] == 'admin':
-        known_job_ids = list(plan_metadata.keys())
-        if OUTPUT.is_dir():
-            for json_file in sorted(OUTPUT.glob('*.json'), key=lambda p: p.stat().st_mtime, reverse=True):
-                job_id = json_file.stem
-                if len(job_id) == 32 and job_id not in plan_metadata:
-                    meta = extract_plan_metadata(job_id)
-                    if meta.get('total_routes', 0) > 0:
-                        plan_metadata[job_id] = meta
-                        known_job_ids.append(job_id)
-        for job_id in known_job_ids:
-            job_trips = [it for it in items if it['job_id'] == job_id]
+    deleted_jobs = []
+    for job_id in known_job_ids:
+        meta = plan_metadata[job_id]
+        summary_list = meta.get('routes_summary') or []
+        job_trips = [it for it in all_trip_items if it['job_id'] == job_id]
+        trip_by_route = {int(t['route_index']): t for t in job_trips}
+        is_entire_job_deleted = job_id in deleted_jobs_map
+        job_deleted_at = deleted_jobs_map.get(job_id)
+
+        active_summary = []
+        trash_summary = []
+        for r in summary_list:
+            idx = int(r['route_index'])
+            matched_trip = trip_by_route.get(idx)
+            route_deleted_at = (
+                job_deleted_at
+                or deleted_routes_map.get((job_id, idx))
+                or (matched_trip.get('deleted_at') if matched_trip else None)
+            )
+            if is_entire_job_deleted or route_deleted_at is not None:
+                trash_summary.append({**r, 'deleted_at': route_deleted_at})
+            else:
+                active_summary.append(r)
+
+        active_job_trips = []
+        trash_job_trips = []
+        max_deleted_at = job_deleted_at
+        for t in job_trips:
+            idx = int(t['route_index'])
+            t_del = (
+                t.get('deleted_at')
+                or job_deleted_at
+                or deleted_routes_map.get((job_id, idx))
+            )
+            if t_del and (not max_deleted_at or t_del > max_deleted_at):
+                max_deleted_at = t_del
+            if is_entire_job_deleted or t_del is not None:
+                trash_job_trips.append(t)
+            else:
+                active_job_trips.append(t)
+
+        for r in trash_summary:
+            r_del = r.get('deleted_at')
+            if r_del and (not max_deleted_at or r_del > max_deleted_at):
+                max_deleted_at = r_del
+
+        if not is_entire_job_deleted and (active_summary or (not summary_list and active_job_trips)):
             admin_jobs.append({
                 'job_id': job_id,
-                'plan': plan_metadata[job_id],
-                'trips': job_trips,
+                'plan': {
+                    **meta,
+                    'routes_summary': active_summary,
+                    'total_routes': len(active_summary) if summary_list else len(active_job_trips),
+                },
+                'trips': active_job_trips,
             })
 
-    return jsonify(trips=items, jobs=admin_jobs if g.user['role'] == 'admin' else None)
+        if is_entire_job_deleted or trash_summary or trash_job_trips:
+            if trash_summary or trash_job_trips:
+                deleted_jobs.append({
+                    'job_id': job_id,
+                    'deleted_at': max_deleted_at,
+                    'job_deleted': is_entire_job_deleted,
+                    'plan': {
+                        **meta,
+                        'routes_summary': trash_summary,
+                        'total_routes': len(trash_summary) if summary_list else len(trash_job_trips),
+                    },
+                    'trips': trash_job_trips,
+                })
+
+    deleted_jobs.sort(key=lambda item: item.get('deleted_at') or '', reverse=True)
+    deleted_routes_count = sum(
+        max(len(item['plan'].get('routes_summary') or []), len(item['trips']))
+        for item in deleted_jobs
+    )
+    return jsonify(
+        trips=active_items,
+        jobs=admin_jobs,
+        deleted_jobs=deleted_jobs,
+        deleted_routes_count=deleted_routes_count,
+    )
 
 
 @app.post('/api/trips')
@@ -1111,13 +1523,14 @@ def assign_trip():
     algorithm = body.get('algorithm')
     route_index = body.get('route_index')
     driver_id = body.get('driver_id')
-    if (not isinstance(job_id, str) or len(job_id) != 32
-            or any(character not in '0123456789abcdef' for character in job_id)):
+    if not _is_valid_hex_id(job_id):
         return jsonify(error='job_id không hợp lệ'), 400
     if not isinstance(algorithm, str) or type(route_index) is not int:
         return jsonify(error='Thuật toán hoặc route_index không hợp lệ'), 400
     if type(driver_id) is not int or not driver_exists(driver_id):
         return jsonify(error='Hãy chọn một tài xế đang hoạt động'), 400
+    if is_route_deleted(job_id, route_index):
+        return jsonify(error='Tuyến hoặc chuyến này đã được xoá mềm; hãy khôi phục trước khi phân công'), 409
     payload = load_saved_job(job_id)
     result = payload.get('results', {}).get(algorithm) if payload else None
     if result is None or not 0 <= route_index < len(result.get('routes', [])):
@@ -1155,7 +1568,7 @@ def assign_trip():
 @login_required
 def get_trip(trip_id):
     row = trip_by_id(trip_id)
-    if row is None:
+    if row is None or (g.user['role'] == 'driver' and is_trip_deleted(row)):
         return jsonify(error=f'Không tìm thấy chuyến giao hàng {trip_id} (404)'), 404
     if g.user['role'] == 'driver' and int(row['driver_id']) != int(g.user['id']):
         return jsonify(error='Chuyến này không được gán cho tài xế hiện tại'), 403
@@ -1169,8 +1582,10 @@ def get_trip(trip_id):
 @login_required
 def change_trip_status(trip_id):
     row = trip_by_id(trip_id)
-    if row is None:
+    if row is None or (g.user['role'] == 'driver' and is_trip_deleted(row)):
         return jsonify(error=f'Không tìm thấy chuyến giao hàng {trip_id} (404)'), 404
+    if is_trip_deleted(row):
+        return jsonify(error='Tuyến đã được xoá mềm; hãy khôi phục trước khi cập nhật trạng thái'), 409
     body = request.get_json(silent=True)
     if not isinstance(body, dict) or not isinstance(body.get('status'), str):
         return jsonify(error='Cần trạng thái chuyến'), 400
@@ -1215,7 +1630,7 @@ def change_trip_driver(trip_id):
 @role_required('driver')
 def complete_stop(trip_id, stop_index):
     row = trip_by_id(trip_id)
-    if row is None:
+    if row is None or is_trip_deleted(row):
         return jsonify(error=f'Không tìm thấy chuyến giao hàng {trip_id} (404)'), 404
     try:
         complete_trip_stop(row, stop_index, g.user)
@@ -1227,12 +1642,113 @@ def complete_stop(trip_id, stop_index):
     return jsonify(trip=trip_payload(updated), stops=list_trip_stops(trip_id))
 
 
+@app.delete('/api/trips/<trip_id>')
+@role_required('admin')
+def delete_trip_soft(trip_id):
+    try:
+        updated = soft_delete_trip(trip_id)
+        return jsonify(ok=True, trip=updated)
+    except LookupError as error:
+        return jsonify(error=str(error)), 404
+
+
+@app.post('/api/trips/<trip_id>/restore')
+@role_required('admin')
+def restore_trip_soft(trip_id):
+    row = trip_by_id(trip_id)
+    if row is None:
+        return jsonify(error='Không tìm thấy chuyến giao hàng'), 404
+    updated = restore_trip(trip_id, _route_indices_for_job(row['job_id']))
+    return jsonify(ok=True, trip=updated)
+
+
+@app.post('/api/routes/soft-delete')
+@role_required('admin')
+def soft_delete_single_route():
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict):
+        return jsonify(error='Cần thông tin job_id và route_index'), 400
+    job_id = body.get('job_id')
+    route_index = body.get('route_index')
+    if not _is_valid_hex_id(job_id) or type(route_index) is not int or route_index < 0:
+        return jsonify(error='job_id hoặc route_index không hợp lệ'), 400
+    known_indices = _route_indices_for_job(job_id)
+    has_trip_row = (
+        get_db()
+        .execute("SELECT 1 FROM trips WHERE job_id = ? AND route_index = ?", (job_id, route_index))
+        .fetchone()
+        is not None
+    )
+    if route_index not in known_indices and not has_trip_row:
+        return jsonify(error='Không tìm thấy tuyến xe cần xoá mềm'), 404
+    deleted_at = soft_delete_route(job_id, route_index)
+    return jsonify(ok=True, job_id=job_id, route_index=route_index, deleted_at=deleted_at)
+
+
+@app.post('/api/routes/restore')
+@role_required('admin')
+def restore_single_route():
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict):
+        return jsonify(error='Cần thông tin job_id và route_index'), 400
+    job_id = body.get('job_id')
+    route_index = body.get('route_index')
+    if not _is_valid_hex_id(job_id) or type(route_index) is not int or route_index < 0:
+        return jsonify(error='job_id hoặc route_index không hợp lệ'), 400
+    if not _job_exists(job_id):
+        return jsonify(error='Không tìm thấy chuyến chứa tuyến xe này'), 404
+    restore_route(job_id, route_index, _route_indices_for_job(job_id))
+    return jsonify(ok=True, job_id=job_id, route_index=route_index)
+
+
+@app.delete('/api/jobs/<job_id>')
+@role_required('admin')
+def delete_job_soft(job_id):
+    if not _is_valid_hex_id(job_id) or not _job_exists(job_id):
+        return jsonify(error=f'Không tìm thấy chuyến {job_id} (404)'), 404
+    deleted_at = soft_delete_job(job_id)
+    return jsonify(ok=True, job_id=job_id, deleted_at=deleted_at)
+
+
+@app.post('/api/jobs/<job_id>/restore')
+@role_required('admin')
+def restore_job_soft(job_id):
+    if not _is_valid_hex_id(job_id) or not _job_exists(job_id):
+        return jsonify(error=f'Không tìm thấy chuyến {job_id} (404)'), 404
+    restore_job(job_id)
+    return jsonify(ok=True, job_id=job_id)
+
+
+@app.post('/api/trips/soft-delete-all')
+@role_required('admin')
+def soft_delete_all_trips():
+    disk_job_ids = []
+    if OUTPUT.is_dir():
+        disk_job_ids = [p.stem for p in OUTPUT.glob('*.json') if _is_valid_hex_id(p.stem)]
+    with JOB_LOCK:
+        completed_mem_ids = [
+            jid for jid, job in JOBS.items()
+            if _is_valid_hex_id(jid) and job.get('status') not in ('queued', 'running')
+        ]
+    summary = soft_delete_all(disk_job_ids + completed_mem_ids)
+    return jsonify(ok=True, **summary)
+
+
+@app.post('/api/trips/restore-all')
+@role_required('admin')
+def restore_all_trips():
+    summary = restore_all_deleted()
+    return jsonify(ok=True, **summary)
+
+
 @app.get('/api/datasets')
 @login_required
 def datasets():
     def dataset_name(key):
-        return (f'Hong Kong n={key[2:]} · HYB · BPR-heavy'
-                if key.startswith('hk') else f'Hồ Chí Minh n={key[4:]} · traffic mô phỏng')
+        for prefix, label in PORYOS_CITY_NAMES.items():
+            if key.startswith(prefix):
+                return f'{label} n={key[len(prefix):]} · HYB · BPR-heavy'
+        return f'Hồ Chí Minh n={key[4:]} · traffic mô phỏng'
     return jsonify(algorithms=ALGORITHMS, datasets=[dict(id=key, name=dataset_name(key),
                    missing=sidecar_status(path), algorithms=DATASET_ALGORITHMS[key])
                    for key, path in DATASETS.items()])
@@ -1262,17 +1778,32 @@ def geocode():
     address = body.get('address')
     if not isinstance(address, str):
         return jsonify(error='Cần nhập địa chỉ'), 400
+    place_name = str(body.get('name') or '').strip()
     try:
-        candidates = geocode_address(address)
+        try:
+            candidates = geocode_address(address)
+            match_query = address
+        except ValueError as primary_error:
+            if (
+                place_name
+                and _normalize_address_text(place_name) not in _normalize_address_text(address)
+            ):
+                combined_query = f'{place_name}, {address}' if address.strip() else place_name
+                candidates = geocode_address(combined_query)
+                match_query = combined_query
+            else:
+                raise primary_error
         _, graph, _ = load_data(body['dataset'])
         node_index = _road_node_index(graph[0])
         ranked = []
         for candidate in candidates:
             node = node_index.nearest(candidate['lat'], candidate['lon'])
             distance = _distance_m(candidate['lat'], candidate['lon'], node.lat, node.lon)
-            match_score, house_match = _score_geocode_candidate(address, candidate)
+            match_score, house_match = _score_geocode_candidate(match_query, candidate)
             ranked.append({
                 **candidate,
+                'road_lat': node.lat,
+                'road_lon': node.lon,
                 'snap_distance_m': round(distance, 1),
                 'snap_status': _snap_policy(distance),
                 'match_score': match_score,
@@ -1280,12 +1811,12 @@ def geocode():
             })
         ranked.sort(key=lambda item: (-item['match_score'], item['snap_distance_m'],
                                       item['provider_order'], item['source_rank']))
-        query_house = _query_house_number(address)
+        query_house = _query_house_number(match_query)
         house_warning = bool(query_house and ranked[0]['house_match'] != 'exact')
         snap_status = ranked[0]['snap_status']
         requires_confirmation = house_warning or snap_status != 'auto'
-        public_fields = ('lat', 'lon', 'display_name', 'provider', 'snap_distance_m',
-                         'snap_status', 'match_score', 'house_match')
+        public_fields = ('lat', 'lon', 'road_lat', 'road_lon', 'display_name', 'provider',
+                         'snap_distance_m', 'snap_status', 'match_score', 'house_match')
         public_candidates = [
             {field: candidate[field] for field in public_fields}
             for candidate in ranked[:10]
@@ -1352,6 +1883,70 @@ def preview_custom_points():
         return jsonify(points=map_points(instance, graph), instance=instance.instance_name,
                        capacity=instance.vehicle_capacity, customers=instance.num_customers,
                        vehicles=instance.num_vehicles)
+    except ValueError as error:
+        return jsonify(error=str(error)), 400
+    except Exception as error:
+        return jsonify(error=str(error)), 422
+
+
+@app.get('/api/custom-points/csv-template')
+@role_required('admin')
+def custom_points_csv_template():
+    return Response(
+        _build_csv_template().encode('utf-8'),
+        mimetype='text/csv; charset=utf-8',
+        headers={'Content-Disposition': 'attachment; filename="mau_diem_giao_tphcm.csv"'},
+    )
+
+
+@app.post('/api/custom-points/parse-csv')
+@role_required('admin')
+def parse_csv_custom_points():
+    dataset_key = 'hcmc10'
+    default_service_minutes = 5.0
+    csv_text = None
+    if 'file' in request.files:
+        uploaded = request.files['file']
+        raw_bytes = uploaded.read()
+        dataset_key = str(request.form.get('dataset') or 'hcmc10')
+        raw_minutes = request.form.get('default_service_minutes')
+        if raw_minutes not in (None, ''):
+            try:
+                default_service_minutes = _finite_number(
+                    float(raw_minutes), 'Thời gian phục vụ mặc định', minimum=0, maximum=1440
+                )
+            except (TypeError, ValueError) as error:
+                return jsonify(error=str(error)), 400
+        for encoding in ('utf-8-sig', 'cp1258', 'utf-8'):
+            try:
+                csv_text = raw_bytes.decode(encoding)
+                break
+            except UnicodeDecodeError:
+                continue
+        if csv_text is None:
+            return jsonify(error='Không đọc được mã ký tự file CSV; hãy lưu ở định dạng UTF-8'), 400
+    else:
+        body = request.get_json(silent=True)
+        if not isinstance(body, dict) or not isinstance(body.get('csv_text'), str):
+            return jsonify(error='Cần tải lên file CSV hoặc truyền csv_text'), 400
+        dataset_key = str(body.get('dataset') or 'hcmc10')
+        csv_text = body['csv_text']
+        if body.get('default_service_minutes') is not None:
+            try:
+                default_service_minutes = _finite_number(
+                    body['default_service_minutes'], 'Thời gian phục vụ mặc định', minimum=0, maximum=1440
+                )
+            except ValueError as error:
+                return jsonify(error=str(error)), 400
+
+    if dataset_key not in DATASETS or not dataset_key.startswith('hcmc'):
+        return jsonify(error='Nhập CSV hiện chỉ hỗ trợ nền giao thông Hồ Chí Minh'), 400
+    try:
+        _, graph, _ = load_data(dataset_key)
+        parsed = parse_custom_points_csv(
+            csv_text, graph, default_service_minutes=default_service_minutes
+        )
+        return jsonify(dataset=dataset_key, **parsed)
     except ValueError as error:
         return jsonify(error=str(error)), 400
     except Exception as error:
@@ -1432,13 +2027,14 @@ def get_run(job_id):
         if job_id in JOBS:
             job_data = dict(JOBS[job_id])
             job_data['stops'] = stops
+            job_data['deleted'] = is_job_deleted(job_id)
             return jsonify(job_data)
     path = OUTPUT / f'{job_id}.json'
     if not path.is_file():
         return jsonify(error=f'Không tìm thấy file dữ liệu cho lượt chạy {job_id} (404)'), 404
     payload = json.loads(path.read_text(encoding='utf-8'))
     return jsonify(id=job_id, config=payload['config'], status='completed' if payload['results'] else 'failed',
-                   stage='Đã nạp kết quả lưu', payload=payload, stops=stops)
+                   stage='Đã nạp kết quả lưu', payload=payload, stops=stops, deleted=is_job_deleted(job_id))
 
 
 @app.get('/api/runs/<job_id>/stops')

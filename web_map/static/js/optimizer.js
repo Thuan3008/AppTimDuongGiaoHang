@@ -332,7 +332,7 @@ export function showAlgorithm() {
   if (evalNote) {
     evalNote.textContent = isDriver
       ? 'Tổng thời gian giao hàng dự kiến gồm thời gian di chuyển và phục vụ, tính từ lúc khởi hành đến khi về kho. Thời gian thực tế có thể thay đổi theo quá trình giao hàng.'
-      : `Nghiệm đang hiển thị thuộc seed ${result.seed ?? 'không xác định'} · Thời gian từ dataset · Departure evaluator: ${result.departure_time_mode}. Đường OSRM chỉ phục vụ hiển thị và có thể khác đường thực nghiệm. Duration gồm thời gian từ khởi hành đến về kho; objective = di chuyển + phục vụ.`;
+      : `${result.seed != null ? `Nghiệm đang hiển thị thuộc seed ${result.seed}` : 'Nghiệm chạy tất định (không dùng seed)'} · Thời gian từ dataset · Departure evaluator: ${result.departure_time_mode}. Đường OSRM chỉ phục vụ hiển thị và có thể khác đường thực nghiệm. Duration gồm thời gian từ khởi hành đến về kho; objective = di chuyển + phục vụ.`;
   }
 
   if ($('csv')) $('csv').disabled = false;

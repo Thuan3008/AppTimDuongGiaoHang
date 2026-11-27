@@ -1,5 +1,6 @@
 import { useMemo, useState, type FormEvent } from "react"
 import {
+  ArchiveRestoreIcon,
   ArrowLeftIcon,
   BanIcon,
   CheckCircle2Icon,
@@ -11,9 +12,11 @@ import {
   MapIcon,
   PrinterIcon,
   RefreshCwIcon,
+  RotateCcwIcon,
   RouteIcon,
   SearchIcon,
   SendIcon,
+  Trash2Icon,
   TruckIcon,
   UserCogIcon,
 } from "lucide-react"
@@ -79,6 +82,7 @@ export interface RouteRowItem {
   duration: number | null
   assignedTrip: Trip | null
   status: RouteFilter
+  deletedAt?: string | null
 }
 
 export interface JobGroupItem {
@@ -97,11 +101,16 @@ export interface JobGroupItem {
   unassignedCount: number
   stopsCompleted: number
   stopsTotal: number
+  deletedAt?: string | null
+  jobDeleted?: boolean
   routes: RouteRowItem[]
 }
 
+type ActionResult = { ok: boolean; error?: string }
+
 interface TripsManagementPageProps {
   adminJobs: AdminJobGroup[]
+  deletedJobs: AdminJobGroup[]
   activeDrivers: Driver[]
   loading: boolean
   onBackToMap: () => void
@@ -113,13 +122,131 @@ interface TripsManagementPageProps {
     algorithm: string,
     routeIndex: number,
     driverId: number
-  ) => Promise<{ ok: boolean; error?: string }>
+  ) => Promise<ActionResult>
   onReassignDriver: (
     tripId: string,
     driverId: number,
     row?: RouteRowItem
-  ) => Promise<{ ok: boolean; error?: string }>
-  onCancelTrip: (tripId: string) => Promise<{ ok: boolean; error?: string }>
+  ) => Promise<ActionResult>
+  onCancelTrip: (tripId: string) => Promise<ActionResult>
+  onSoftDeleteRoute: (row: RouteRowItem) => Promise<ActionResult>
+  onRestoreRoute: (row: RouteRowItem) => Promise<ActionResult>
+  onSoftDeleteJob: (jobId: string) => Promise<ActionResult>
+  onRestoreJob: (jobId: string) => Promise<ActionResult>
+  onSoftDeleteAll: () => Promise<ActionResult>
+  onRestoreAll: () => Promise<ActionResult>
+}
+
+function formatDeletedAt(iso?: string | null): string {
+  if (!iso) return ""
+  const parsed = new Date(iso)
+  if (Number.isNaN(parsed.getTime())) return iso
+  return parsed.toLocaleString("vi-VN")
+}
+
+function buildJobGroups(groups: AdminJobGroup[]): JobGroupItem[] {
+  return groups.map((group) => {
+    const { job_id: jobId, plan, trips, deleted_at: deletedAt, job_deleted: jobDeleted } = group
+    const tripName =
+      plan.trip_name ||
+      `Chuyến ${plan.instance || plan.dataset || jobId.slice(0, 8)}`
+    const dataset = plan.dataset || plan.instance || "—"
+    const algorithm = plan.algorithm || "RAPO-2709"
+    const summaryList = Array.isArray(plan.routes_summary)
+      ? plan.routes_summary
+      : []
+
+    const routes: RouteRowItem[] = []
+    if (summaryList.length > 0) {
+      for (const r of summaryList) {
+        const assignedTrip =
+          trips.find((t) => Number(t.route_index) === Number(r.route_index)) ||
+          null
+        const status = (assignedTrip?.status ?? "unassigned") as RouteFilter
+        routes.push({
+          key: `${jobId}-${r.route_index}`,
+          jobId,
+          tripName,
+          dataset,
+          algorithm: assignedTrip?.algorithm || algorithm,
+          routeIndex: r.route_index,
+          vehicle: r.vehicle,
+          stopsCount: assignedTrip?.stops_total ?? r.stops_count,
+          load: r.load,
+          duration: r.duration,
+          assignedTrip,
+          status,
+          deletedAt: r.deleted_at ?? assignedTrip?.deleted_at ?? deletedAt,
+        })
+      }
+    } else {
+      for (const trip of trips) {
+        routes.push({
+          key: `${jobId}-${trip.route_index}-${trip.id}`,
+          jobId,
+          tripName,
+          dataset,
+          algorithm: trip.algorithm,
+          routeIndex: trip.route_index,
+          vehicle: trip.route_index + 1,
+          stopsCount: trip.stops_total,
+          load: null,
+          duration: null,
+          assignedTrip: trip,
+          status: trip.status as RouteFilter,
+          deletedAt: trip.deleted_at ?? deletedAt,
+        })
+      }
+    }
+
+    const totalVehicles = plan.total_routes || routes.length || trips.length || 0
+    const totalStopsCount = routes.reduce(
+      (sum, r) => sum + (r.stopsCount || 0),
+      0
+    )
+    const assignedCount = routes.filter((r) => r.status === "assigned").length
+    const inProgressCount = routes.filter(
+      (r) => r.status === "in_progress"
+    ).length
+    const completedCount = routes.filter(
+      (r) => r.status === "completed"
+    ).length
+    const cancelledCount = routes.filter(
+      (r) => r.status === "cancelled"
+    ).length
+    const unassignedCount = routes.filter(
+      (r) => r.status === "unassigned"
+    ).length
+    const stopsCompleted = trips.reduce(
+      (sum, t) => sum + (t.stops_completed || 0),
+      0
+    )
+    const stopsTotal = trips.reduce(
+      (sum, t) => sum + (t.stops_total || 0),
+      0
+    )
+
+    return {
+      jobId,
+      tripName,
+      dataset,
+      algorithm,
+      departureTime: plan.departure_time,
+      latestDeparture: plan.latest_departure,
+      totalVehicles,
+      totalStopsCount,
+      assignedCount,
+      inProgressCount,
+      completedCount,
+      cancelledCount,
+      unassignedCount,
+      stopsCompleted,
+      stopsTotal,
+      deletedAt,
+      jobDeleted,
+      routes,
+    }
+  })
 }
 
 function statusBadgeVariant(
@@ -138,6 +265,7 @@ function routeStatusText(status: RouteFilter): string {
 
 export function TripsManagementPage({
   adminJobs,
+  deletedJobs,
   activeDrivers,
   loading,
   onBackToMap,
@@ -147,7 +275,14 @@ export function TripsManagementPage({
   onAssignRoute,
   onReassignDriver,
   onCancelTrip,
+  onSoftDeleteRoute,
+  onRestoreRoute,
+  onSoftDeleteJob,
+  onRestoreJob,
+  onSoftDeleteAll,
+  onRestoreAll,
 }: TripsManagementPageProps) {
+  const [viewScope, setViewScope] = useState<"active" | "trash">("active")
   const [searchQuery, setSearchQuery] = useState("")
   const [statusFilter, setStatusFilter] = useState<RouteFilter>("all")
   const [feedback, setFeedback] = useState<{
@@ -185,109 +320,14 @@ export function TripsManagementPage({
     null
   )
 
-  // Build grouped data by Job (Chuyến)
-  const jobGroups = useMemo<JobGroupItem[]>(() => {
-    return adminJobs.map((group) => {
-      const { job_id: jobId, plan, trips } = group
-      const tripName =
-        plan.trip_name ||
-        `Chuyến ${plan.instance || plan.dataset || jobId.slice(0, 8)}`
-      const dataset = plan.dataset || plan.instance || "—"
-      const algorithm = plan.algorithm || "RAPO-2709"
-      const summaryList = Array.isArray(plan.routes_summary)
-        ? plan.routes_summary
-        : []
+  const activeJobGroups = useMemo(() => buildJobGroups(adminJobs), [adminJobs])
+  const trashJobGroups = useMemo(
+    () => buildJobGroups(deletedJobs),
+    [deletedJobs]
+  )
+  const jobGroups = viewScope === "trash" ? trashJobGroups : activeJobGroups
 
-      const routes: RouteRowItem[] = []
-      if (summaryList.length > 0) {
-        for (const r of summaryList) {
-          const assignedTrip =
-            trips.find((t) => Number(t.route_index) === Number(r.route_index)) ||
-            null
-          const status = (assignedTrip?.status ?? "unassigned") as RouteFilter
-          routes.push({
-            key: `${jobId}-${r.route_index}`,
-            jobId,
-            tripName,
-            dataset,
-            algorithm: assignedTrip?.algorithm || algorithm,
-            routeIndex: r.route_index,
-            vehicle: r.vehicle,
-            stopsCount: assignedTrip?.stops_total ?? r.stops_count,
-            load: r.load,
-            duration: r.duration,
-            assignedTrip,
-            status,
-          })
-        }
-      } else {
-        for (const trip of trips) {
-          routes.push({
-            key: `${jobId}-${trip.route_index}-${trip.id}`,
-            jobId,
-            tripName,
-            dataset,
-            algorithm: trip.algorithm,
-            routeIndex: trip.route_index,
-            vehicle: trip.route_index + 1,
-            stopsCount: trip.stops_total,
-            load: null,
-            duration: null,
-            assignedTrip: trip,
-            status: trip.status as RouteFilter,
-          })
-        }
-      }
-
-      const totalVehicles = plan.total_routes || routes.length || trips.length || 0
-      const totalStopsCount = routes.reduce(
-        (sum, r) => sum + (r.stopsCount || 0),
-        0
-      )
-      const assignedCount = routes.filter((r) => r.status === "assigned").length
-      const inProgressCount = routes.filter(
-        (r) => r.status === "in_progress"
-      ).length
-      const completedCount = routes.filter(
-        (r) => r.status === "completed"
-      ).length
-      const cancelledCount = routes.filter(
-        (r) => r.status === "cancelled"
-      ).length
-      const unassignedCount = routes.filter(
-        (r) => r.status === "unassigned"
-      ).length
-      const stopsCompleted = trips.reduce(
-        (sum, t) => sum + (t.stops_completed || 0),
-        0
-      )
-      const stopsTotal = trips.reduce(
-        (sum, t) => sum + (t.stops_total || 0),
-        0
-      )
-
-      return {
-        jobId,
-        tripName,
-        dataset,
-        algorithm,
-        departureTime: plan.departure_time,
-        latestDeparture: plan.latest_departure,
-        totalVehicles,
-        totalStopsCount,
-        assignedCount,
-        inProgressCount,
-        completedCount,
-        cancelledCount,
-        unassignedCount,
-        stopsCompleted,
-        stopsTotal,
-        routes,
-      }
-    })
-  }, [adminJobs])
-
-  // Overall KPI statistics
+  // Overall KPI statistics (always reflects active fleet, plus trash totals for tabs)
   const stats = useMemo(() => {
     let totalRoutes = 0
     let unassigned = 0
@@ -295,7 +335,7 @@ export function TripsManagementPage({
     let inProgress = 0
     let completed = 0
 
-    for (const job of jobGroups) {
+    for (const job of activeJobGroups) {
       totalRoutes += job.totalVehicles
       unassigned += job.unassignedCount
       assigned += job.assignedCount
@@ -303,15 +343,22 @@ export function TripsManagementPage({
       completed += job.completedCount
     }
 
+    const trashRoutes = trashJobGroups.reduce(
+      (sum, job) => sum + job.totalVehicles,
+      0
+    )
+
     return {
-      totalJobs: jobGroups.length,
+      totalJobs: activeJobGroups.length,
       totalRoutes,
       unassigned,
       assigned,
       inProgress,
       completed,
+      trashJobs: trashJobGroups.length,
+      trashRoutes,
     }
-  }, [jobGroups])
+  }, [activeJobGroups, trashJobGroups])
 
   // Filtered job groups according to search & status filter
   const filteredJobs = useMemo(() => {
@@ -467,6 +514,116 @@ export function TripsManagementPage({
     }
   }
 
+  const runBusyAction = async (
+    key: string,
+    action: () => Promise<ActionResult>,
+    successMsg: string,
+    description?: string
+  ) => {
+    setBusyKey(key)
+    setFeedback(null)
+    try {
+      const res = await action()
+      if (res.ok) {
+        toast.success(successMsg, description ? { description } : undefined)
+        setFeedback({ text: successMsg, error: false })
+      } else {
+        const msg = res.error || "Thao tác không thành công"
+        toast.error(msg)
+        setFeedback({ text: msg, error: true })
+      }
+    } finally {
+      setBusyKey(null)
+    }
+  }
+
+  const handleSoftDeleteRoute = async (row: RouteRowItem) => {
+    const trip = row.assignedTrip
+    const extraWarning =
+      trip?.status === "in_progress"
+        ? `\nLưu ý: Tuyến này đang ĐANG GIAO cho ${driverDisplayName(
+            trip.driver_username,
+            trip.driver_full_name
+          )}.`
+        : ""
+    if (
+      !window.confirm(
+        `Xoá mềm tuyến Xe ${row.vehicle} thuộc chuyến "${row.tripName}"?${extraWarning}\nTuyến sẽ chuyển vào mục Đã xoá mềm và có thể khôi phục bất cứ lúc nào.`
+      )
+    ) {
+      return
+    }
+    await runBusyAction(
+      row.key,
+      () => onSoftDeleteRoute(row),
+      `Đã xoá mềm tuyến Xe ${row.vehicle}`,
+      `Chuyến: ${row.tripName}`
+    )
+  }
+
+  const handleRestoreRoute = async (row: RouteRowItem) => {
+    await runBusyAction(
+      row.key,
+      () => onRestoreRoute(row),
+      `Đã khôi phục tuyến Xe ${row.vehicle}`,
+      `Chuyến: ${row.tripName}`
+    )
+  }
+
+  const handleSoftDeleteJob = async (job: JobGroupItem) => {
+    if (
+      !window.confirm(
+        `Xoá mềm toàn bộ chuyến "${job.tripName}" (${job.totalVehicles} tuyến xe)?\nDữ liệu không bị xoá vĩnh viễn và có thể khôi phục trong mục Đã xoá mềm.`
+      )
+    ) {
+      return
+    }
+    await runBusyAction(
+      `job-${job.jobId}`,
+      () => onSoftDeleteJob(job.jobId),
+      `Đã xoá mềm chuyến "${job.tripName}"`
+    )
+  }
+
+  const handleRestoreJob = async (job: JobGroupItem) => {
+    await runBusyAction(
+      `job-${job.jobId}`,
+      () => onRestoreJob(job.jobId),
+      `Đã khôi phục chuyến "${job.tripName}"`
+    )
+  }
+
+  const handleSoftDeleteAll = async () => {
+    if (
+      !window.confirm(
+        `Xoá mềm toàn bộ ${stats.totalJobs} chuyến đang hoạt động (${stats.totalRoutes} tuyến xe)?\nTất cả sẽ chuyển vào mục Đã xoá mềm và có thể khôi phục lại bất cứ lúc nào.`
+      )
+    ) {
+      return
+    }
+    await runBusyAction(
+      "all-jobs",
+      onSoftDeleteAll,
+      "Đã xoá mềm toàn bộ các chuyến đang hoạt động"
+    )
+  }
+
+  const handleRestoreAll = async () => {
+    if (
+      !window.confirm(
+        `Khôi phục toàn bộ ${stats.trashJobs} chuyến (${stats.trashRoutes} tuyến xe) từ mục Đã xoá mềm trở lại danh sách hoạt động?`
+      )
+    ) {
+      return
+    }
+    await runBusyAction(
+      "all-jobs",
+      onRestoreAll,
+      "Đã khôi phục toàn bộ chuyến từ mục Đã xoá mềm"
+    )
+    setViewScope("active")
+  }
+
   const handleOpenDetail = async (trip: Trip) => {
     setDetailTrip(trip)
     setDetailStops([])
@@ -514,12 +671,71 @@ export function TripsManagementPage({
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex items-center gap-1 rounded-lg border border-border bg-muted/40 p-0.5">
+            <Button
+              type="button"
+              size="xs"
+              variant={viewScope === "active" ? "default" : "ghost"}
+              onClick={() => setViewScope("active")}
+            >
+              Đang hoạt động ({stats.totalJobs})
+            </Button>
+            <Button
+              type="button"
+              size="xs"
+              variant={viewScope === "trash" ? "default" : "ghost"}
+              onClick={() => setViewScope("trash")}
+            >
+              <Trash2Icon data-icon="inline-start" />
+              Đã xoá mềm ({stats.trashRoutes})
+            </Button>
+          </div>
+
+          {viewScope === "active" ? (
+            <Button
+              type="button"
+              variant="destructive"
+              size="sm"
+              disabled={loading || Boolean(busyKey) || stats.totalJobs === 0}
+              onClick={() => void handleSoftDeleteAll()}
+              title="Xoá mềm tất cả chuyến và tuyến đang hoạt động"
+            >
+              {busyKey === "all-jobs" ? (
+                <Loader2Icon
+                  data-icon="inline-start"
+                  className="animate-spin"
+                />
+              ) : (
+                <Trash2Icon data-icon="inline-start" />
+              )}
+              Xoá tất cả
+            </Button>
+          ) : (
+            <Button
+              type="button"
+              variant="default"
+              size="sm"
+              disabled={loading || Boolean(busyKey) || stats.trashJobs === 0}
+              onClick={() => void handleRestoreAll()}
+            >
+              {busyKey === "all-jobs" ? (
+                <Loader2Icon
+                  data-icon="inline-start"
+                  className="animate-spin"
+                />
+              ) : (
+                <ArchiveRestoreIcon data-icon="inline-start" />
+              )}
+              Khôi phục tất cả
+            </Button>
+          )}
+
           <Button
             type="button"
             variant="outline"
             size="sm"
-            disabled={loading}
+            disabled={loading || Boolean(busyKey)}
             onClick={() => void onRefresh()}
           >
             <RefreshCwIcon
@@ -677,6 +893,16 @@ export function TripsManagementPage({
         </CardContent>
       </Card>
 
+      {viewScope === "trash" && (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3.5 py-2.5 text-xs text-amber-900 dark:text-amber-200">
+          <span>
+            Các tuyến và chuyến tại đây đã được <strong>xoá mềm</strong> (được ẩn
+            khỏi điều phối và tài xế nhưng vẫn giữ nguyên lịch sử giao hàng). Bạn
+            có thể khôi phục lại từng tuyến hoặc cả chuyến bất cứ lúc nào.
+          </span>
+        </div>
+      )}
+
       {/* Grouped Jobs List: 1 Chuyến = 1 Khối, bấm vào mới hiện các tuyến */}
       <div className="flex flex-col gap-3">
         {filteredJobs.length === 0 ? (
@@ -685,9 +911,27 @@ export function TripsManagementPage({
               <LayersIcon className="size-8 text-muted-foreground/60" />
               <p className="mt-2 text-sm font-medium">
                 {jobGroups.length === 0
-                  ? "Chưa có chuyến giao hàng nào. Hãy quay lại Bản đồ điều phối để tạo và tối ưu chuyến mới."
+                  ? viewScope === "trash"
+                    ? "Thùng rác xoá mềm đang trống."
+                    : stats.trashJobs > 0
+                      ? `Không còn chuyến nào đang hoạt động (${stats.trashJobs} chuyến đang nằm trong mục Đã xoá mềm).`
+                      : "Chưa có chuyến giao hàng nào. Hãy quay lại Bản đồ điều phối để tạo và tối ưu chuyến mới."
                   : "Không tìm thấy chuyến nào khớp với bộ lọc hiện tại."}
               </p>
+              {viewScope === "active" &&
+                jobGroups.length === 0 &&
+                stats.trashJobs > 0 && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="mt-3"
+                    onClick={() => setViewScope("trash")}
+                  >
+                    <Trash2Icon data-icon="inline-start" />
+                    Mở mục Đã xoá mềm ({stats.trashRoutes} tuyến)
+                  </Button>
+                )}
             </CardContent>
           </Card>
         ) : (
@@ -733,6 +977,11 @@ export function TripsManagementPage({
                         <Badge variant="secondary" className="text-xs">
                           {algorithmLabel(job.algorithm)}
                         </Badge>
+                        {viewScope === "trash" && (
+                          <Badge variant="destructive" className="text-xs">
+                            {job.jobDeleted ? "Đã xoá cả chuyến" : "Có tuyến đã xoá mềm"}
+                          </Badge>
+                        )}
                       </div>
 
                       <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
@@ -753,6 +1002,12 @@ export function TripsManagementPage({
                           {assignedCount}/{job.totalVehicles} xe đã giao ·{" "}
                           {job.completedCount}/{job.totalVehicles} hoàn thành
                         </span>
+                        {viewScope === "trash" && job.deletedAt && (
+                          <>
+                            <span>•</span>
+                            <span>Xoá lúc {formatDeletedAt(job.deletedAt)}</span>
+                          </>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -765,6 +1020,7 @@ export function TripsManagementPage({
                     <Button
                       type="button"
                       size="sm"
+                      disabled={Boolean(busyKey)}
                       onClick={() => void onViewRouteOnMap(job.jobId)}
                       title="Mở toàn bộ các xe của chuyến này trên bản đồ"
                     >
@@ -772,6 +1028,47 @@ export function TripsManagementPage({
                       <span className="hidden sm:inline">Toàn cảnh chuyến</span>
                       <span className="sm:hidden">Bản đồ</span>
                     </Button>
+
+                    {viewScope === "active" ? (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        disabled={Boolean(busyKey)}
+                        className="border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                        onClick={() => void handleSoftDeleteJob(job)}
+                        title="Xoá mềm toàn bộ chuyến này"
+                      >
+                        {busyKey === `job-${job.jobId}` ? (
+                          <Loader2Icon
+                            data-icon="inline-start"
+                            className="animate-spin"
+                          />
+                        ) : (
+                          <Trash2Icon data-icon="inline-start" />
+                        )}
+                        <span className="hidden sm:inline">Xoá chuyến</span>
+                      </Button>
+                    ) : (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        disabled={Boolean(busyKey)}
+                        onClick={() => void handleRestoreJob(job)}
+                        title="Khôi phục toàn bộ chuyến này"
+                      >
+                        {busyKey === `job-${job.jobId}` ? (
+                          <Loader2Icon
+                            data-icon="inline-start"
+                            className="animate-spin"
+                          />
+                        ) : (
+                          <RotateCcwIcon data-icon="inline-start" />
+                        )}
+                        <span>Khôi phục chuyến</span>
+                      </Button>
+                    )}
 
                     <Button
                       type="button"
@@ -919,96 +1216,167 @@ export function TripsManagementPage({
 
                                   <td className="px-4 py-2.5 text-right whitespace-nowrap sm:px-5">
                                     <div className="flex items-center justify-end gap-1.5">
-                                      <Button
-                                        type="button"
-                                        variant="outline"
-                                        size="xs"
-                                        disabled={isRowBusy}
-                                        onClick={() =>
-                                          trip
-                                            ? void onOpenTripOnMap(trip)
-                                            : void onViewRouteOnMap(
-                                                row.jobId,
-                                                row.routeIndex
-                                              )
-                                        }
-                                      >
-                                        <MapIcon data-icon="inline-start" />
-                                        Bản đồ
-                                      </Button>
+                                      {viewScope === "active" ? (
+                                        <>
+                                          <Button
+                                            type="button"
+                                            variant="outline"
+                                            size="xs"
+                                            disabled={isRowBusy || Boolean(busyKey)}
+                                            onClick={() =>
+                                              trip
+                                                ? void onOpenTripOnMap(trip)
+                                                : void onViewRouteOnMap(
+                                                    row.jobId,
+                                                    row.routeIndex
+                                                  )
+                                            }
+                                          >
+                                            <MapIcon data-icon="inline-start" />
+                                            Bản đồ
+                                          </Button>
 
-                                      <Button
-                                        type="button"
-                                        variant="outline"
-                                        size="xs"
-                                        disabled={isRowBusy}
-                                        title="In lệnh điều phối & phiếu bàn giao khổ A4"
-                                        onClick={() =>
-                                          setManifestTarget({
-                                            jobId: row.jobId,
-                                            routeIndex: row.routeIndex,
-                                            vehicle: row.vehicle,
-                                            algorithm: row.algorithm,
-                                            tripName: row.tripName,
-                                            dataset: row.dataset,
-                                            trip: trip,
-                                          })
-                                        }
-                                      >
-                                        <PrinterIcon data-icon="inline-start" />
-                                        In lệnh
-                                      </Button>
+                                          <Button
+                                            type="button"
+                                            variant="outline"
+                                            size="xs"
+                                            disabled={isRowBusy || Boolean(busyKey)}
+                                            title="In lệnh điều phối & phiếu bàn giao khổ A4"
+                                            onClick={() =>
+                                              setManifestTarget({
+                                                jobId: row.jobId,
+                                                routeIndex: row.routeIndex,
+                                                vehicle: row.vehicle,
+                                                algorithm: row.algorithm,
+                                                tripName: row.tripName,
+                                                dataset: row.dataset,
+                                                trip: trip,
+                                              })
+                                            }
+                                          >
+                                            <PrinterIcon data-icon="inline-start" />
+                                            In lệnh
+                                          </Button>
 
-                                      {trip && (
-                                        <Button
-                                          type="button"
-                                          variant="ghost"
-                                          size="xs"
-                                          disabled={isRowBusy}
-                                          onClick={() => void handleOpenDetail(trip)}
-                                        >
-                                          <EyeIcon data-icon="inline-start" />
-                                          Điểm giao
-                                        </Button>
-                                      )}
-
-                                      {canAssignOrReassign && (
-                                        <Button
-                                          type="button"
-                                          variant={trip ? "secondary" : "default"}
-                                          size="xs"
-                                          disabled={
-                                            isRowBusy || activeDrivers.length === 0
-                                          }
-                                          onClick={() => openAssignSheet(row)}
-                                        >
-                                          {trip ? (
-                                            <UserCogIcon data-icon="inline-start" />
-                                          ) : (
-                                            <SendIcon data-icon="inline-start" />
+                                          {trip && (
+                                            <Button
+                                              type="button"
+                                              variant="ghost"
+                                              size="xs"
+                                              disabled={isRowBusy || Boolean(busyKey)}
+                                              onClick={() => void handleOpenDetail(trip)}
+                                            >
+                                              <EyeIcon data-icon="inline-start" />
+                                              Điểm giao
+                                            </Button>
                                           )}
-                                          {trip ? "Đổi tài xế" : "Giao Driver"}
-                                        </Button>
-                                      )}
 
-                                      {canCancel && (
-                                        <Button
-                                          type="button"
-                                          variant="destructive"
-                                          size="xs"
-                                          disabled={isRowBusy}
-                                          onClick={() => void handleCancel(row)}
-                                        >
-                                          {isRowBusy ? (
-                                            <Loader2Icon
-                                              data-icon="inline-start"
-                                              className="animate-spin"
-                                            />
-                                          ) : (
-                                            <BanIcon data-icon="inline-start" />
+                                          {canAssignOrReassign && (
+                                            <Button
+                                              type="button"
+                                              variant={trip ? "secondary" : "default"}
+                                              size="xs"
+                                              disabled={
+                                                isRowBusy ||
+                                                Boolean(busyKey) ||
+                                                activeDrivers.length === 0
+                                              }
+                                              onClick={() => openAssignSheet(row)}
+                                            >
+                                              {trip ? (
+                                                <UserCogIcon data-icon="inline-start" />
+                                              ) : (
+                                                <SendIcon data-icon="inline-start" />
+                                              )}
+                                              {trip ? "Đổi tài xế" : "Giao Driver"}
+                                            </Button>
                                           )}
-                                          Huỷ
-                                        </Button>
+
+                                          {canCancel && (
+                                            <Button
+                                              type="button"
+                                              variant="outline"
+                                              size="xs"
+                                              disabled={isRowBusy || Boolean(busyKey)}
+                                              onClick={() => void handleCancel(row)}
+                                            >
+                                              <BanIcon data-icon="inline-start" />
+                                              Huỷ
+                                            </Button>
+                                          )}
+
+                                          <Button
+                                            type="button"
+                                            variant="destructive"
+                                            size="xs"
+                                            disabled={isRowBusy || Boolean(busyKey)}
+                                            title="Xoá mềm tuyến này khỏi danh sách hoạt động"
+                                            onClick={() =>
+                                              void handleSoftDeleteRoute(row)
+                                            }
+                                          >
+                                            {isRowBusy ? (
+                                              <Loader2Icon
+                                                data-icon="inline-start"
+                                                className="animate-spin"
+                                              />
+                                            ) : (
+                                              <Trash2Icon data-icon="inline-start" />
+                                            )}
+                                            Xoá mềm
+                                          </Button>
+                                        </>
+                                      ) : (
+                                        <>
+                                          <Button
+                                            type="button"
+                                            variant="outline"
+                                            size="xs"
+                                            disabled={isRowBusy || Boolean(busyKey)}
+                                            onClick={() =>
+                                              trip
+                                                ? void onOpenTripOnMap(trip)
+                                                : void onViewRouteOnMap(
+                                                    row.jobId,
+                                                    row.routeIndex
+                                                  )
+                                            }
+                                          >
+                                            <MapIcon data-icon="inline-start" />
+                                            Bản đồ
+                                          </Button>
+
+                                          {trip && (
+                                            <Button
+                                              type="button"
+                                              variant="ghost"
+                                              size="xs"
+                                              disabled={isRowBusy || Boolean(busyKey)}
+                                              onClick={() => void handleOpenDetail(trip)}
+                                            >
+                                              <EyeIcon data-icon="inline-start" />
+                                              Điểm giao
+                                            </Button>
+                                          )}
+
+                                          <Button
+                                            type="button"
+                                            variant="default"
+                                            size="xs"
+                                            disabled={isRowBusy || Boolean(busyKey)}
+                                            onClick={() => void handleRestoreRoute(row)}
+                                          >
+                                            {isRowBusy ? (
+                                              <Loader2Icon
+                                                data-icon="inline-start"
+                                                className="animate-spin"
+                                              />
+                                            ) : (
+                                              <RotateCcwIcon data-icon="inline-start" />
+                                            )}
+                                            Khôi phục
+                                          </Button>
+                                        </>
                                       )}
                                     </div>
                                   </td>

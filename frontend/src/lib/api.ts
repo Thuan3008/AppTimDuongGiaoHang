@@ -30,6 +30,11 @@ export function fmt(n: number | string | null | undefined): string {
 export function algorithmLabel(name: string): string {
   const map: Record<string, string> = {
     "RAPO-2709": "RAPO",
+    "ARO-Original": "ARO-Original",
+    "POA-Original": "POA-Original",
+    GA: "GA",
+    "GA-LS": "GA-LS",
+    Greedy: "Greedy",
     "HCMC-TD-ERAPO": "HCMC-TD-ERAPO",
   }
   return map[name] || name
@@ -166,7 +171,11 @@ export async function api<T = unknown>(
   return data as T
 }
 
-export function downloadFile(data: string, type: string, name: string): void {
+export function downloadFile(
+  data: BlobPart,
+  type: string,
+  name: string
+): void {
   const url = URL.createObjectURL(new Blob([data], { type }))
   const a = document.createElement("a")
   a.href = url

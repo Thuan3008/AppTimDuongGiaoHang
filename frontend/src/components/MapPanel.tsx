@@ -309,7 +309,9 @@ export const MapPanel = forwardRef<MapPanelHandle, MapPanelProps>(
         }
       }
 
-      if (points.length > 0 && pointsCountRef.current !== points.length) {
+      if (points.length === 0) {
+        pointsCountRef.current = 0
+      } else if (pointsCountRef.current !== points.length) {
         pointsCountRef.current = points.length
         fitPoints()
       }

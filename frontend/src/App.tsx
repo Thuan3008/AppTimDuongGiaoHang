@@ -24,6 +24,7 @@ import {
   ApiError,
   algorithmLabel,
   api,
+  downloadFile,
   driverDisplayName,
   exportAlgorithmCSV,
   exportPayloadJSON,
@@ -34,6 +35,8 @@ import {
 import type {
   AdminJobGroup,
   AppView,
+  CsvParseResponse,
+  CsvParsedPoint,
   CustomCustomerPayload,
   CustomPointDraft,
   CustomPointsPayload,
@@ -54,7 +57,7 @@ import type {
   User,
 } from "@/types/rapo"
 
-const DEFAULT_DEPOT_NOTE = "Nhập địa chỉ rồi bấm Tìm hoặc Xem điểm."
+const DEFAULT_DEPOT_NOTE = "Nhập địa chỉ hoặc tên địa điểm rồi nhấn Enter / Tìm."
 
 function createDefaultDepot(): DepotDraft {
   return {
@@ -63,6 +66,8 @@ function createDefaultDepot(): DepotDraft {
     lat: "",
     lon: "",
     snapConfirmed: false,
+    snapStatus: undefined,
+    snapDistanceM: null,
     note: DEFAULT_DEPOT_NOTE,
     warning: null,
     candidates: [],
@@ -102,6 +107,8 @@ function createPointDraft(
     snapConfirmed: Boolean(
       value.snap_confirmed || value.snap_status === "confirm"
     ),
+    snapStatus: value.snap_status,
+    snapDistanceM: null,
     snapCheckedLat: hasSnap ? latStr : undefined,
     snapCheckedLon: hasSnap ? lonStr : undefined,
     note: DEFAULT_DEPOT_NOTE,
@@ -109,6 +116,114 @@ function createPointDraft(
     candidates: [],
     selectedCandidate: null,
   }
+}
+
+function csvPointNote(item: CsvParsedPoint): string {
+  if (item.lat != null && item.lon != null && item.snap_distance_m != null) {
+    return `Từ CSV · ${item.lat.toFixed(6)}, ${item.lon.toFixed(6)} · cách đường ${fmt(item.snap_distance_m)} m`
+  }
+  return item.needs_geocode ? "Chờ tự dò tọa độ từ địa chỉ…" : DEFAULT_DEPOT_NOTE
+}
+
+function createDepotFromCsv(item: CsvParsedPoint): DepotDraft {
+  const hasCoords = item.lat != null && item.lon != null
+  const latStr = hasCoords ? String(item.lat) : ""
+  const lonStr = hasCoords ? String(item.lon) : ""
+  return {
+    name: item.name || "Kho",
+    address: item.address,
+    lat: latStr,
+    lon: lonStr,
+    resolvedAddress: hasCoords ? item.address : undefined,
+    snapConfirmed: false,
+    snapStatus: item.snap_status || undefined,
+    snapDistanceM: item.snap_distance_m,
+    snapCheckedLat: hasCoords ? latStr : undefined,
+    snapCheckedLon: hasCoords ? lonStr : undefined,
+    note: csvPointNote(item),
+    warning: item.warning,
+    candidates: [],
+    selectedCandidate: null,
+    resolving: false,
+  }
+}
+
+function createPointFromCsv(
+  item: CsvParsedPoint,
+  defaultServiceMinutes: string
+): CustomPointDraft {
+  const draft = createPointDraft(
+    {
+      name: item.name,
+      address: item.address,
+      lat: item.lat ?? undefined,
+      lon: item.lon ?? undefined,
+      demand: item.demand,
+      service_time: item.service_time,
+      time_window: item.time_window,
+      snap_confirmed: false,
+      snap_status: item.snap_status ?? undefined,
+    },
+    defaultServiceMinutes
+  )
+  return {
+    ...draft,
+    snapConfirmed: false,
+    snapDistanceM: item.snap_distance_m,
+    warning: item.warning,
+    note: csvPointNote(item),
+  }
+}
+
+function buildMapPointsFromDrafts(
+  depotDraft: DepotDraft,
+  pointDrafts: CustomPointDraft[]
+): MapPoint[] {
+  const list: MapPoint[] = []
+  const dLat = Number(depotDraft.lat)
+  const dLon = Number(depotDraft.lon)
+  if (
+    depotDraft.lat.trim() !== "" &&
+    depotDraft.lon.trim() !== "" &&
+    Number.isFinite(dLat) &&
+    Number.isFinite(dLon)
+  ) {
+    list.push({
+      id: 0,
+      name: depotDraft.name.trim() || "Kho",
+      address: depotDraft.address.trim() || undefined,
+      lat: dLat,
+      lon: dLon,
+      demand: 0,
+      depot: true,
+      snap_distance_m: depotDraft.snapDistanceM ?? undefined,
+    })
+  }
+  pointDrafts.forEach((pt, idx) => {
+    const lat = Number(pt.lat)
+    const lon = Number(pt.lon)
+    if (
+      pt.lat.trim() === "" ||
+      pt.lon.trim() === "" ||
+      !Number.isFinite(lat) ||
+      !Number.isFinite(lon)
+    ) {
+      return
+    }
+    const id = idx + 1
+    const demandVal = Number(pt.demand)
+    list.push({
+      id,
+      name: pt.name.trim() || `Điểm giao ${id}`,
+      address: pt.address.trim() || undefined,
+      lat,
+      lon,
+      demand: Number.isFinite(demandVal) && demandVal > 0 ? demandVal : 1,
+      depot: false,
+      snap_distance_m: pt.snapDistanceM ?? undefined,
+    })
+  })
+  return list
 }
 
 function parseRequiredNumber(raw: string, label: string): number {
@@ -171,6 +286,10 @@ export function App() {
   )
   const [tripName, setTripName] = useState("")
   const [dataset, setDataset] = useState("")
+  const [csvMode, setCsvMode] = useState(false)
+  const [csvImporting, setCsvImporting] = useState(false)
+  const [csvFileName, setCsvFileName] = useState<string | null>(null)
+  const [csvSummary, setCsvSummary] = useState<string | null>(null)
   const [manualMode, setManualMode] = useState(false)
   const [manualVehicles, setManualVehicles] = useState("1")
   const [manualCapacity, setManualCapacity] = useState("100")
@@ -194,6 +313,7 @@ export function App() {
   const [selectedResultAlg, setSelectedResultAlg] = useState("")
   const [allTrips, setAllTrips] = useState<Trip[]>([])
   const [adminJobs, setAdminJobs] = useState<AdminJobGroup[]>([])
+  const [deletedAdminJobs, setDeletedAdminJobs] = useState<AdminJobGroup[]>([])
   const [currentJobId, setCurrentJobId] = useState<string | null>(null)
   const [currentTrip, setCurrentTrip] = useState<Trip | null>(null)
   const [deliveryStatuses, setDeliveryStatuses] = useState<TripStop[]>([])
@@ -210,6 +330,7 @@ export function App() {
   // Refs for fresh async reads
   const mapRef = useRef<MapPanelHandle | null>(null)
   const pollTimerRef = useRef<number | null>(null)
+  const csvBatchIdRef = useRef(0)
   const userRef = useRef<User | null>(user)
   const busyRef = useRef(busy)
   const datasetRef = useRef(dataset)
@@ -287,6 +408,9 @@ export function App() {
       const data = await api<TripsResponse>("/api/trips")
       setAllTrips(data.trips || [])
       setAdminJobs(Array.isArray(data.jobs) ? data.jobs : [])
+      setDeletedAdminJobs(
+        Array.isArray(data.deleted_jobs) ? data.deleted_jobs : []
+      )
 
       const activeJobId = currentJobIdRef.current
       const activeTrip = currentTripRef.current
@@ -448,7 +572,7 @@ export function App() {
             const fitnessStr = firstResult ? fmt(firstResult.fitness) : "—"
 
             toast.success(`Đã tối ưu thành công ${rCount} tuyến`, {
-              description: `Thuật toán: ${firstAlg || "RAPO"} · Fitness: ${fitnessStr}s · Seed: ${firstResult?.seed ?? 0}`,
+              description: `Thuật toán: ${algorithmLabel(firstAlg || "RAPO")} · Fitness: ${fitnessStr}s · ${firstResult?.seed != null ? `Seed: ${firstResult.seed}` : "Tất định"}`,
             })
             return
           }
@@ -519,22 +643,30 @@ export function App() {
       if (savedJobId) {
         try {
           const job = await api<RunJobResponse>(`/api/runs/${savedJobId}`)
-          if (job.config) {
-            applySavedConfig(job.config, catalogList)
-          }
-          if (job.payload) {
-            setCurrentJobId(savedJobId)
-            setCurrentTrip(null)
-            setShowStopsPanel(false)
-            applyResultPayload(job.payload, job.stops || [])
-            setStatus("Đã nạp kết quả gần nhất · có thể giao từng route")
-            return
-          }
-          if (job.status === "queued" || job.status === "running") {
-            setBusy(true)
-            setStartedAt(Date.now())
-            await pollJob(savedJobId)
-            return
+          if (job.deleted) {
+            try {
+              localStorage.removeItem("rapo-map-job")
+            } catch {
+              // ignore
+            }
+          } else {
+            if (job.config) {
+              applySavedConfig(job.config, catalogList)
+            }
+            if (job.payload) {
+              setCurrentJobId(savedJobId)
+              setCurrentTrip(null)
+              setShowStopsPanel(false)
+              applyResultPayload(job.payload, job.stops || [])
+              setStatus("Đã nạp kết quả gần nhất · có thể giao từng route")
+              return
+            }
+            if (job.status === "queued" || job.status === "running") {
+              setBusy(true)
+              setStartedAt(Date.now())
+              await pollJob(savedJobId)
+              return
+            }
           }
         } catch {
           try {
@@ -733,6 +865,14 @@ export function App() {
   // ---------------------------------------------------------------------------
   // Geocoding, Snap-Point & Custom Delivery Points
   // ---------------------------------------------------------------------------
+  const syncDraftPointsToMap = useCallback(
+    (depotDraft: DepotDraft, pointDrafts: CustomPointDraft[]) => {
+      const nextPoints = buildMapPointsFromDrafts(depotDraft, pointDrafts)
+      setPoints(nextPoints)
+    },
+    []
+  )
+
   const checkPointSnap = async (lat: number, lon: number) => {
     return api<SnapPointResponse>("/api/snap-point", {
       method: "POST",
@@ -745,8 +885,14 @@ export function App() {
     draft: T,
     candidate: GeocodeCandidate,
     address: string,
-    candidates: GeocodeCandidate[]
+    candidates: GeocodeCandidate[],
+    options: {
+      allowPrompt?: boolean
+      warning?: string | null
+      confirmed?: boolean
+    } = {}
   ): T | null => {
+    const { allowPrompt = true, warning = null, confirmed } = options
     if (candidate.snap_status === "rejected") {
       setStatus(
         `Điểm này cách đường gần nhất ${fmt(
@@ -756,23 +902,29 @@ export function App() {
       )
       return null
     }
-    if (candidate.snap_status === "confirm") {
-      const accepted = window.confirm(
-        `Điểm này cách đường gần nhất ${fmt(
-          candidate.snap_distance_m
-        )} m. Bạn có chắc muốn dùng vị trí này không?`
-      )
-      if (!accepted) return null
+    let isConfirmed = Boolean(confirmed)
+    if (candidate.snap_status === "confirm" && !isConfirmed) {
+      if (allowPrompt) {
+        const accepted = window.confirm(
+          `Điểm này cách đường gần nhất ${fmt(
+            candidate.snap_distance_m
+          )} m. Bạn có chắc muốn dùng vị trí này không?`
+        )
+        if (!accepted) return null
+        isConfirmed = true
+      }
     }
     return {
       ...draft,
       lat: String(candidate.lat),
       lon: String(candidate.lon),
       resolvedAddress: address,
-      snapConfirmed: candidate.snap_status === "confirm",
+      snapConfirmed: isConfirmed,
+      snapStatus: candidate.snap_status,
+      snapDistanceM: candidate.snap_distance_m,
       snapCheckedLat: String(candidate.lat),
       snapCheckedLon: String(candidate.lon),
-      warning: null,
+      warning,
       candidates,
       selectedCandidate: candidate,
       note: `Đã chọn: ${candidate.display_name} · ${Number(
@@ -786,8 +938,10 @@ export function App() {
 
   const resolveSingleDraft = async <T extends DepotDraft | CustomPointDraft>(
     draft: T,
-    updateDraft: (updater: (prev: T) => T) => void
+    updateDraft: (updater: (prev: T) => T) => void,
+    options: { interactive?: boolean; allowTentative?: boolean } = {}
   ): Promise<T> => {
+    const { interactive = true, allowTentative = true } = options
     const address = draft.address.trim()
     const latNum = Number(draft.lat)
     const lonNum = Number(draft.lon)
@@ -862,16 +1016,47 @@ export function App() {
       const data = await api<GeocodeResponse>("/api/geocode", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ dataset: datasetRef.current, address }),
+        body: JSON.stringify({
+          dataset: datasetRef.current,
+          address,
+          name: draft.name.trim(),
+        }),
       })
 
       if (data.requires_confirmation) {
+        const canTentativelyPin =
+          allowTentative && data.result && data.result.snap_status !== "rejected"
+        if (canTentativelyPin) {
+          const tentative = applyCandidateToDraft(
+            draft,
+            data.result,
+            address,
+            data.candidates || [],
+            {
+              allowPrompt: false,
+              warning: data.warning || "Địa chỉ cần xác nhận thủ công.",
+              confirmed: false,
+            }
+          )
+          if (tentative) {
+            updateDraft(() => tentative)
+            if (interactive) {
+              setStatus(
+                data.warning || "Đã gợi ý vị trí trên bản đồ; hãy kiểm tra lại.",
+                false
+              )
+            }
+            return tentative
+          }
+        }
         updateDraft((prev) => ({
           ...prev,
           resolvedAddress: undefined,
           lat: "",
           lon: "",
           snapConfirmed: false,
+          snapStatus: data.result?.snap_status,
+          snapDistanceM: data.result?.snap_distance_m ?? null,
           snapCheckedLat: undefined,
           snapCheckedLon: undefined,
           warning: data.warning || "Địa chỉ cần xác nhận thủ công.",
@@ -888,7 +1073,8 @@ export function App() {
         draft,
         data.result,
         address,
-        data.candidates || []
+        data.candidates || [],
+        { allowPrompt: interactive }
       )
       if (!updated) {
         updateDraft((prev) => ({ ...prev, resolving: false }))
@@ -897,43 +1083,64 @@ export function App() {
       updateDraft(() => updated)
       return updated
     } catch (err) {
-      updateDraft((prev) => ({ ...prev, resolving: false }))
+      updateDraft((prev) => ({
+        ...prev,
+        resolving: false,
+        warning: err instanceof Error ? err.message : prev.warning,
+      }))
       throw err
     }
   }
 
-  const resolveDepot = async (): Promise<DepotDraft> => {
-    return resolveSingleDraft(depotRef.current, (updater) => {
-      setDepot((prev) => {
-        const next = updater(prev)
-        depotRef.current = next
-        return next
-      })
-    })
+  const resolveDepot = async (
+    options: { interactive?: boolean; allowTentative?: boolean } = {}
+  ): Promise<DepotDraft> => {
+    const resolved = await resolveSingleDraft(
+      depotRef.current,
+      (updater) => {
+        setDepot((prev) => {
+          const next = updater(prev)
+          depotRef.current = next
+          return next
+        })
+      },
+      options
+    )
+    syncDraftPointsToMap(resolved, customPointsRef.current)
+    return resolved
   }
 
-  const resolvePointByUid = async (uid: string): Promise<CustomPointDraft> => {
+  const resolvePointByUid = async (
+    uid: string,
+    options: { interactive?: boolean; allowTentative?: boolean } = {}
+  ): Promise<CustomPointDraft> => {
     const target = customPointsRef.current.find((p) => p.uid === uid)
     if (!target) throw new Error("Không tìm thấy điểm giao")
-    return resolveSingleDraft(target, (updater) => {
-      setCustomPoints((prev) => {
-        const next = prev.map((item) =>
-          item.uid === uid ? updater(item) : item
-        )
-        customPointsRef.current = next
-        return next
-      })
-    })
+    const resolved = await resolveSingleDraft(
+      target,
+      (updater) => {
+        setCustomPoints((prev) => {
+          const next = prev.map((item) =>
+            item.uid === uid ? updater(item) : item
+          )
+          customPointsRef.current = next
+          return next
+        })
+      },
+      options
+    )
+    syncDraftPointsToMap(depotRef.current, customPointsRef.current)
+    return resolved
   }
 
   const resolveAllAddresses = async (): Promise<{
     depot: DepotDraft
     customers: CustomPointDraft[]
   }> => {
-    const resolvedDepot = await resolveDepot()
+    const resolvedDepot = await resolveDepot({ interactive: true })
     const resolvedCustomers: CustomPointDraft[] = []
     for (const pt of customPointsRef.current) {
-      const resolved = await resolvePointByUid(pt.uid)
+      const resolved = await resolvePointByUid(pt.uid, { interactive: true })
       resolvedCustomers.push(resolved)
     }
     return { depot: resolvedDepot, customers: resolvedCustomers }
@@ -996,6 +1203,11 @@ export function App() {
   }
 
   const handleManualModeChange = async (enabled: boolean) => {
+    csvBatchIdRef.current += 1
+    setCsvImporting(false)
+    if (!enabled) {
+      setCsvMode(false)
+    }
     setManualMode(enabled)
     let nextDataset = dataset
 
@@ -1033,6 +1245,48 @@ export function App() {
   }
 
   const handleDatasetChange = async (nextDataset: string) => {
+    csvBatchIdRef.current += 1
+    setCsvImporting(false)
+
+    if (nextDataset === "__csv_hcmc__") {
+      const hcmc =
+        catalog.find(
+          (item) => item.id === dataset && item.id.startsWith("hcmc") && item.missing.length === 0
+        ) ||
+        catalog.find(
+          (item) => item.id.startsWith("hcmc") && item.missing.length === 0
+        )
+      if (!hcmc) {
+        setStatus("Chưa có dữ liệu nền TP.HCM sẵn sàng để nhập CSV", true)
+        return
+      }
+      setCsvMode(true)
+      setManualMode(true)
+      setDataset(hcmc.id)
+      datasetRef.current = hcmc.id
+      clearResult()
+      setSelectedAlgorithms(
+        hcmc.algorithms.length ? [hcmc.algorithms[0]] : ["HCMC-TD-ERAPO"]
+      )
+      if (customPointsRef.current.length === 0) {
+        setCustomPoints([createPointDraft({}, manualServiceMinutes)])
+      }
+      const existingMapPoints = buildMapPointsFromDrafts(
+        depotRef.current,
+        customPointsRef.current
+      )
+      if (existingMapPoints.length > 0) {
+        setPoints(existingMapPoints)
+      } else {
+        setPoints([])
+      }
+      setStatus(
+        "Chọn file CSV hoặc tải file mẫu để tự động dò tọa độ và chấm điểm lên bản đồ TP.HCM."
+      )
+      return
+    }
+
+    setCsvMode(false)
     setDataset(nextDataset)
     try {
       await previewDataset(nextDataset, catalog, manualMode)
@@ -1041,14 +1295,251 @@ export function App() {
     }
   }
 
-  const handleDepotAddressInput = (address: string) => {
-    setDepot((prev) => {
-      if (prev.resolvedAddress && address.trim() !== prev.resolvedAddress) {
+  const handleDownloadCsvTemplate = async () => {
+    try {
+      const response = await fetch("/api/custom-points/csv-template", {
+        credentials: "same-origin",
+      })
+      if (!response.ok) {
+        throw new Error(`Không tải được file mẫu (HTTP ${response.status})`)
+      }
+      const rawBytes = new Uint8Array(await response.arrayBuffer())
+      const hasBom =
+        rawBytes.length >= 3 &&
+        rawBytes[0] === 0xef &&
+        rawBytes[1] === 0xbb &&
+        rawBytes[2] === 0xbf
+      const fileBytes = hasBom
+        ? rawBytes
+        : new Uint8Array([0xef, 0xbb, 0xbf, ...rawBytes])
+      downloadFile(
+        fileBytes,
+        "text/csv;charset=utf-8",
+        "mau_diem_giao_tphcm.csv"
+      )
+      setStatus("Đã tải file mẫu mau_diem_giao_tphcm.csv")
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Lỗi tải CSV mẫu"
+      setStatus(msg, true)
+      toast.error("Không tải được file CSV mẫu", { description: msg })
+    }
+  }
+
+  const handleConfirmAllSuggested = () => {
+    const confirmDraft = <T extends DepotDraft | CustomPointDraft>(item: T): T => {
+      if (
+        item.lat.trim() !== "" &&
+        item.lon.trim() !== "" &&
+        item.snapStatus !== "rejected" &&
+        (Boolean(item.warning) || item.snapStatus === "confirm")
+      ) {
         return {
-          ...prev,
+          ...item,
+          snapConfirmed: true,
+          warning: null,
+        }
+      }
+      return item
+    }
+    const nextDepot = confirmDraft(depotRef.current)
+    const nextPoints = customPointsRef.current.map(confirmDraft)
+    depotRef.current = nextDepot
+    customPointsRef.current = nextPoints
+    setDepot(nextDepot)
+    setCustomPoints(nextPoints)
+    syncDraftPointsToMap(nextDepot, nextPoints)
+    setCsvSummary("Đã xác nhận toàn bộ vị trí gợi ý trên bản đồ.")
+    setStatus("Đã xác nhận toàn bộ các điểm gợi ý; có thể bấm Tạo và tối ưu chuyến.")
+  }
+
+  const handleImportCsv = async (file: File) => {
+    const batchId = ++csvBatchIdRef.current
+    let targetDataset = datasetRef.current
+    if (!targetDataset.startsWith("hcmc")) {
+      const hcmc = catalog.find(
+        (item) => item.id.startsWith("hcmc") && item.missing.length === 0
+      )
+      if (!hcmc) {
+        setStatus("Chưa có nền giao thông TP.HCM để nhập CSV", true)
+        return
+      }
+      targetDataset = hcmc.id
+      setDataset(hcmc.id)
+      datasetRef.current = hcmc.id
+    }
+
+    setCsvMode(true)
+    setManualMode(true)
+    setCsvImporting(true)
+    setCsvFileName(file.name)
+    setCsvSummary("Đang đọc file CSV…")
+    setStatus(`Đang phân tích file ${file.name}…`)
+    clearResult()
+
+    try {
+      const form = new FormData()
+      form.append("file", file)
+      form.append("dataset", targetDataset)
+      form.append("default_service_minutes", manualServiceMinutes || "5")
+
+      const parsed = await api<CsvParseResponse>("/api/custom-points/parse-csv", {
+        method: "POST",
+        body: form,
+        timeoutMs: 30000,
+      })
+      if (csvBatchIdRef.current !== batchId) return
+
+      if (parsed.vehicles != null) {
+        setManualVehicles(String(parsed.vehicles))
+      }
+      if (parsed.capacity != null) {
+        setManualCapacity(String(parsed.capacity))
+      }
+
+      const initialDepot = createDepotFromCsv(parsed.depot)
+      const initialPoints = parsed.customers.map((item) =>
+        createPointFromCsv(item, manualServiceMinutes || "5")
+      )
+      depotRef.current = initialDepot
+      customPointsRef.current = initialPoints
+      setDepot(initialDepot)
+      setCustomPoints(initialPoints)
+      syncDraftPointsToMap(initialDepot, initialPoints)
+
+      const pendingJobs: Array<{ kind: "depot" } | { kind: "customer"; uid: string }> = []
+      if (parsed.depot.needs_geocode) {
+        pendingJobs.push({ kind: "depot" })
+      }
+      initialPoints.forEach((pt, idx) => {
+        if (parsed.customers[idx].needs_geocode) {
+          pendingJobs.push({ kind: "customer", uid: pt.uid })
+        }
+      })
+
+      let failedCount = 0
+      for (let i = 0; i < pendingJobs.length; i++) {
+        if (csvBatchIdRef.current !== batchId) return
+        const task = pendingJobs[i]
+        const currentLabel =
+          task.kind === "depot"
+            ? depotRef.current.address
+            : customPointsRef.current.find((p) => p.uid === task.uid)?.address || ""
+        const progressText = `Đang dò tọa độ ${i + 1}/${pendingJobs.length}: ${currentLabel}…`
+        setCsvSummary(progressText)
+        setStatus(progressText)
+
+        try {
+          if (task.kind === "depot") {
+            await resolveDepot({ interactive: false, allowTentative: true })
+          } else {
+            await resolvePointByUid(task.uid, {
+              interactive: false,
+              allowTentative: true,
+            })
+          }
+        } catch {
+          failedCount += 1
+        }
+      }
+
+      if (csvBatchIdRef.current !== batchId) return
+
+      const allDrafts = [depotRef.current, ...customPointsRef.current]
+      const okCount = allDrafts.filter(
+        (d) =>
+          d.lat.trim() !== "" &&
+          d.lon.trim() !== "" &&
+          !d.warning &&
+          d.snapStatus !== "rejected"
+      ).length
+      const confirmCount = allDrafts.filter(
+        (d) =>
+          d.lat.trim() !== "" &&
+          d.lon.trim() !== "" &&
+          Boolean(d.warning) &&
+          d.snapStatus !== "rejected"
+      ).length
+      const unresolvedCount = allDrafts.filter(
+        (d) => d.lat.trim() === "" || d.lon.trim() === "" || d.snapStatus === "rejected"
+      ).length
+
+      syncDraftPointsToMap(depotRef.current, customPointsRef.current)
+      window.setTimeout(() => mapRef.current?.fit(), 80)
+
+      const summaryText = `Đã nạp 1 kho + ${initialPoints.length} điểm giao · ${okCount} hợp lệ, ${confirmCount} gợi ý cần kiểm tra, ${Math.max(failedCount, unresolvedCount)} chưa có tọa độ.`
+      setCsvSummary(summaryText)
+      setStatus(summaryText, unresolvedCount > 0)
+      if (unresolvedCount === 0) {
+        toast.success(`Đã nhập ${initialPoints.length + 1} điểm từ CSV`, {
+          description:
+            confirmCount > 0
+              ? `${confirmCount} điểm gợi ý đang chờ xác nhận nhanh.`
+              : "Tất cả điểm đã tự động chấm lên bản đồ.",
+        })
+      } else {
+        toast.warning("Đã nhập CSV kèm một số điểm chưa tìm thấy tọa độ", {
+          description: summaryText,
+        })
+      }
+    } catch (err) {
+      if (csvBatchIdRef.current !== batchId) return
+      const msg = err instanceof Error ? err.message : "Lỗi đọc file CSV"
+      setCsvSummary(msg)
+      setStatus(msg, true)
+      toast.error("Không nhập được file CSV", { description: msg })
+    } finally {
+      if (csvBatchIdRef.current === batchId) {
+        setCsvImporting(false)
+      }
+    }
+  }
+
+  const handleDepotAddressInput = (address: string) => {
+    const prev = depotRef.current
+    const nextDepot: DepotDraft =
+      prev.resolvedAddress && address.trim() !== prev.resolvedAddress
+        ? {
+            ...prev,
+            address,
+            resolvedAddress: undefined,
+            snapConfirmed: false,
+            snapStatus: undefined,
+            snapDistanceM: null,
+            snapCheckedLat: undefined,
+            snapCheckedLon: undefined,
+            lat: "",
+            lon: "",
+            note: "Địa chỉ đã thay đổi, cần tìm lại.",
+          }
+        : { ...prev, address }
+    depotRef.current = nextDepot
+    setDepot(nextDepot)
+  }
+
+  const handleDepotCoordInput = (field: "lat" | "lon", value: string) => {
+    const nextDepot: DepotDraft = {
+      ...depotRef.current,
+      [field]: value,
+      snapConfirmed: false,
+      snapCheckedLat: undefined,
+      snapCheckedLon: undefined,
+    }
+    depotRef.current = nextDepot
+    setDepot(nextDepot)
+    syncDraftPointsToMap(nextDepot, customPointsRef.current)
+  }
+
+  const handlePointAddressInput = (uid: string, address: string) => {
+    const nextPoints = customPointsRef.current.map((pt) => {
+      if (pt.uid !== uid) return pt
+      if (pt.resolvedAddress && address.trim() !== pt.resolvedAddress) {
+        return {
+          ...pt,
           address,
           resolvedAddress: undefined,
           snapConfirmed: false,
+          snapStatus: undefined,
+          snapDistanceM: null,
           snapCheckedLat: undefined,
           snapCheckedLon: undefined,
           lat: "",
@@ -1056,40 +1547,10 @@ export function App() {
           note: "Địa chỉ đã thay đổi, cần tìm lại.",
         }
       }
-      return { ...prev, address }
+      return { ...pt, address }
     })
-  }
-
-  const handleDepotCoordInput = (field: "lat" | "lon", value: string) => {
-    setDepot((prev) => ({
-      ...prev,
-      [field]: value,
-      snapConfirmed: false,
-      snapCheckedLat: undefined,
-      snapCheckedLon: undefined,
-    }))
-  }
-
-  const handlePointAddressInput = (uid: string, address: string) => {
-    setCustomPoints((prev) =>
-      prev.map((pt) => {
-        if (pt.uid !== uid) return pt
-        if (pt.resolvedAddress && address.trim() !== pt.resolvedAddress) {
-          return {
-            ...pt,
-            address,
-            resolvedAddress: undefined,
-            snapConfirmed: false,
-            snapCheckedLat: undefined,
-            snapCheckedLon: undefined,
-            lat: "",
-            lon: "",
-            note: "Địa chỉ đã thay đổi, cần tìm lại.",
-          }
-        }
-        return { ...pt, address }
-      })
-    )
+    customPointsRef.current = nextPoints
+    setCustomPoints(nextPoints)
   }
 
   const handlePointCoordInput = (
@@ -1097,19 +1558,20 @@ export function App() {
     field: "lat" | "lon",
     value: string
   ) => {
-    setCustomPoints((prev) =>
-      prev.map((pt) =>
-        pt.uid === uid
-          ? {
-              ...pt,
-              [field]: value,
-              snapConfirmed: false,
-              snapCheckedLat: undefined,
-              snapCheckedLon: undefined,
-            }
-          : pt
-      )
+    const nextPoints = customPointsRef.current.map((pt) =>
+      pt.uid === uid
+        ? {
+            ...pt,
+            [field]: value,
+            snapConfirmed: false,
+            snapCheckedLat: undefined,
+            snapCheckedLon: undefined,
+          }
+        : pt
     )
+    customPointsRef.current = nextPoints
+    setCustomPoints(nextPoints)
+    syncDraftPointsToMap(depotRef.current, nextPoints)
   }
 
   const handleMapPick = async (lat: number, lon: number): Promise<boolean> => {
@@ -1136,7 +1598,9 @@ export function App() {
           depotRef.current.candidates
         )
         if (!updated) return false
+        depotRef.current = updated
         setDepot(updated)
+        syncDraftPointsToMap(updated, customPointsRef.current)
       } else if (target.uid) {
         const currentPt = customPointsRef.current.find(
           (p) => p.uid === target.uid
@@ -1149,9 +1613,12 @@ export function App() {
           currentPt.candidates
         )
         if (!updated) return false
-        setCustomPoints((prev) =>
-          prev.map((item) => (item.uid === target.uid ? updated : item))
+        const nextPoints = customPointsRef.current.map((item) =>
+          item.uid === target.uid ? updated : item
         )
+        customPointsRef.current = nextPoints
+        setCustomPoints(nextPoints)
+        syncDraftPointsToMap(depotRef.current, nextPoints)
       }
 
       setPendingPick(null)
@@ -1509,6 +1976,10 @@ export function App() {
       catalog={catalog}
       tripName={tripName}
       dataset={dataset}
+      csvMode={csvMode}
+      csvImporting={csvImporting}
+      csvFileName={csvFileName}
+      csvSummary={csvSummary}
       manualMode={manualMode}
       manualVehicles={manualVehicles}
       manualCapacity={manualCapacity}
@@ -1539,10 +2010,19 @@ export function App() {
       onDepotAddressInput={handleDepotAddressInput}
       onDepotCoordInput={handleDepotCoordInput}
       onResolveDepot={() =>
-        void resolveDepot().catch((err) =>
+        void resolveDepot({ interactive: true }).catch((err) =>
           setStatus(err instanceof Error ? err.message : "Lỗi tìm địa chỉ", true)
         )
       }
+      onAutoResolveDepot={() => {
+        const d = depotRef.current
+        if (!d.address.trim() || d.resolving || d.resolvedAddress === d.address.trim()) {
+          return
+        }
+        void resolveDepot({ interactive: false, allowTentative: true }).catch(() => {
+          // keep inline warning on depot card
+        })
+      }}
       onSelectDepotCandidate={(candidate) => {
         const updated = applyCandidateToDraft(
           depotRef.current,
@@ -1550,7 +2030,11 @@ export function App() {
           depotRef.current.address.trim(),
           depotRef.current.candidates
         )
-        if (updated) setDepot(updated)
+        if (updated) {
+          depotRef.current = updated
+          setDepot(updated)
+          syncDraftPointsToMap(updated, customPointsRef.current)
+        }
       }}
       onPickDepotOnMap={() => {
         setPendingPick({ kind: "depot", label: "Kho xuất phát" })
@@ -1563,9 +2047,12 @@ export function App() {
           createPointDraft({}, manualServiceMinutes),
         ])
       }
-      onRemovePoint={(uid) =>
-        setCustomPoints((prev) => prev.filter((item) => item.uid !== uid))
-      }
+      onRemovePoint={(uid) => {
+        const nextPoints = customPointsRef.current.filter((item) => item.uid !== uid)
+        customPointsRef.current = nextPoints
+        setCustomPoints(nextPoints)
+        syncDraftPointsToMap(depotRef.current, nextPoints)
+      }}
       onPointChange={(uid, patch) =>
         setCustomPoints((prev) =>
           prev.map((item) => (item.uid === uid ? { ...item, ...patch } : item))
@@ -1574,10 +2061,27 @@ export function App() {
       onPointAddressInput={handlePointAddressInput}
       onPointCoordInput={handlePointCoordInput}
       onResolvePoint={(uid) =>
-        void resolvePointByUid(uid).catch((err) =>
+        void resolvePointByUid(uid, { interactive: true }).catch((err) =>
           setStatus(err instanceof Error ? err.message : "Lỗi tìm địa chỉ", true)
         )
       }
+      onAutoResolvePoint={(uid) => {
+        const target = customPointsRef.current.find((p) => p.uid === uid)
+        if (
+          !target ||
+          !target.address.trim() ||
+          target.resolving ||
+          target.resolvedAddress === target.address.trim()
+        ) {
+          return
+        }
+        void resolvePointByUid(uid, {
+          interactive: false,
+          allowTentative: true,
+        }).catch(() => {
+          // keep inline warning on point card
+        })
+      }}
       onSelectPointCandidate={(uid, candidate) => {
         const target = customPointsRef.current.find((p) => p.uid === uid)
         if (!target) return
@@ -1588,9 +2092,12 @@ export function App() {
           target.candidates
         )
         if (updated) {
-          setCustomPoints((prev) =>
-            prev.map((item) => (item.uid === uid ? updated : item))
+          const nextPoints = customPointsRef.current.map((item) =>
+            item.uid === uid ? updated : item
           )
+          customPointsRef.current = nextPoints
+          setCustomPoints(nextPoints)
+          syncDraftPointsToMap(depotRef.current, nextPoints)
         }
       }}
       onPickPointOnMap={(uid, index) => {
@@ -1603,6 +2110,9 @@ export function App() {
         setMobileMenuOpen(false)
       }}
       onPreviewPoints={() => void handlePreviewCustomPoints()}
+      onImportCsv={(file) => void handleImportCsv(file)}
+      onDownloadCsvTemplate={() => void handleDownloadCsvTemplate()}
+      onConfirmAllSuggested={handleConfirmAllSuggested}
       onToggleAlgorithm={(name) =>
         setSelectedAlgorithms((prev) =>
           prev.includes(name)
@@ -1635,7 +2145,7 @@ export function App() {
   )
 
   return (
-    <div className="flex min-h-svh flex-col bg-background text-foreground">
+    <div className="flex h-svh flex-col overflow-hidden bg-background text-foreground print:h-auto print:overflow-visible">
       <HeaderBar
         user={user}
         dark={dark}
@@ -1653,9 +2163,10 @@ export function App() {
 
       {/* View: Trips / Routes Management (Admin only) */}
       {user.role === "admin" && activeView === "trips" ? (
-        <main className="min-h-0 flex-1 bg-muted/10">
+        <main className="min-h-0 flex-1 overflow-y-auto bg-muted/10 print:overflow-visible">
           <TripsManagementPage
             adminJobs={adminJobs}
+            deletedJobs={deletedAdminJobs}
             activeDrivers={activeDrivers}
             loading={tripsLoading}
             onBackToMap={() => setActiveView("map")}
@@ -1748,10 +2259,129 @@ export function App() {
                 }
               }
             }}
+            onSoftDeleteRoute={async (row) => {
+              try {
+                await api("/api/routes/soft-delete", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    job_id: row.jobId,
+                    route_index: row.routeIndex,
+                  }),
+                })
+                if (
+                  currentTripRef.current &&
+                  currentTripRef.current.job_id === row.jobId &&
+                  Number(currentTripRef.current.route_index) === Number(row.routeIndex)
+                ) {
+                  setCurrentTrip(null)
+                  setShowStopsPanel(false)
+                }
+                await Promise.all([reloadTrips(), loadDrivers()])
+                return { ok: true }
+              } catch (err) {
+                return {
+                  ok: false,
+                  error:
+                    err instanceof Error ? err.message : "Lỗi xoá mềm tuyến xe",
+                }
+              }
+            }}
+            onRestoreRoute={async (row) => {
+              try {
+                await api("/api/routes/restore", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    job_id: row.jobId,
+                    route_index: row.routeIndex,
+                  }),
+                })
+                await Promise.all([reloadTrips(), loadDrivers()])
+                return { ok: true }
+              } catch (err) {
+                return {
+                  ok: false,
+                  error:
+                    err instanceof Error ? err.message : "Lỗi khôi phục tuyến xe",
+                }
+              }
+            }}
+            onSoftDeleteJob={async (jobId) => {
+              try {
+                await api(`/api/jobs/${jobId}`, { method: "DELETE" })
+                if (
+                  currentJobIdRef.current === jobId ||
+                  currentTripRef.current?.job_id === jobId
+                ) {
+                  clearResult()
+                }
+                try {
+                  if (localStorage.getItem("rapo-map-job") === jobId) {
+                    localStorage.removeItem("rapo-map-job")
+                  }
+                } catch {
+                  // ignore
+                }
+                await Promise.all([reloadTrips(), loadDrivers()])
+                return { ok: true }
+              } catch (err) {
+                return {
+                  ok: false,
+                  error:
+                    err instanceof Error ? err.message : "Lỗi xoá mềm chuyến",
+                }
+              }
+            }}
+            onRestoreJob={async (jobId) => {
+              try {
+                await api(`/api/jobs/${jobId}/restore`, { method: "POST" })
+                await Promise.all([reloadTrips(), loadDrivers()])
+                return { ok: true }
+              } catch (err) {
+                return {
+                  ok: false,
+                  error:
+                    err instanceof Error ? err.message : "Lỗi khôi phục chuyến",
+                }
+              }
+            }}
+            onSoftDeleteAll={async () => {
+              try {
+                await api("/api/trips/soft-delete-all", { method: "POST" })
+                clearResult()
+                try {
+                  localStorage.removeItem("rapo-map-job")
+                } catch {
+                  // ignore
+                }
+                await Promise.all([reloadTrips(), loadDrivers()])
+                return { ok: true }
+              } catch (err) {
+                return {
+                  ok: false,
+                  error:
+                    err instanceof Error ? err.message : "Lỗi xoá mềm tất cả chuyến",
+                }
+              }
+            }}
+            onRestoreAll={async () => {
+              try {
+                await api("/api/trips/restore-all", { method: "POST" })
+                await Promise.all([reloadTrips(), loadDrivers()])
+                return { ok: true }
+              } catch (err) {
+                return {
+                  ok: false,
+                  error:
+                    err instanceof Error ? err.message : "Lỗi khôi phục tất cả chuyến",
+                }
+              }
+            }}
           />
         </main>
       ) : user.role === "admin" && activeView === "drivers" ? (
-        <main className="min-h-0 flex-1 bg-muted/10">
+        <main className="min-h-0 flex-1 overflow-y-auto bg-muted/10 print:overflow-visible">
           <DriversManagementPage
             drivers={drivers}
             loading={driversLoading}
@@ -1782,16 +2412,16 @@ export function App() {
           </Sheet>
 
           {/* Main Split Workspace */}
-          <div className="flex min-h-0 flex-1">
+          <div className="flex min-h-0 flex-1 overflow-hidden print:overflow-visible">
             {/* Desktop Sidebar */}
-            <aside className="hidden w-[380px] shrink-0 border-r border-border bg-muted/15 lg:block xl:w-[410px]">
-              <ScrollArea className="h-[calc(100svh-3.5rem)]">
+            <aside className="hidden h-full w-[380px] shrink-0 overflow-hidden border-r border-border bg-muted/15 lg:block xl:w-[410px]">
+              <ScrollArea className="h-full">
                 {sidebarContent}
               </ScrollArea>
             </aside>
 
             {/* Right Workspace: Map + Results */}
-            <main className="min-w-0 flex-1 bg-muted/10">
+            <main className="min-h-0 min-w-0 flex-1 overflow-y-auto bg-muted/10 print:overflow-visible">
               <div className="mx-auto flex max-w-[1600px] flex-col gap-4 p-3 sm:p-4">
                 <MapPanel
                   ref={mapRef}

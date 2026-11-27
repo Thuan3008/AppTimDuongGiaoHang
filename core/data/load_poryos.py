@@ -283,14 +283,37 @@ def _build_instance(
     )
 
 
-def _resolve_collection_root(source: Path, graph_ref: str, explicit_root: str | Path | None) -> Path | None:
+def resolve_poryos_sidecar_root(
+    source: Path,
+    relative_path: str | Path,
+    explicit_root: str | Path | None = None,
+    fallback_roots: tuple[str | Path, ...] = (),
+    *,
+    require_manifest: bool = True,
+) -> Path | None:
+    """Tìm thư mục gốc chứa sidecar (kiểm tra mamut-collection.json cho Poryos)."""
+    rel = Path(relative_path)
+
+    def _valid(root: Path) -> bool:
+        return (root / rel).exists() and (
+            not require_manifest or (root / "mamut-collection.json").is_file()
+        )
+
     if explicit_root is not None:
         root = Path(explicit_root)
-        return root if (root / graph_ref).exists() else None
+        return root if _valid(root) else None
     for ancestor in source.parents:
-        if (ancestor / graph_ref).exists():
+        if _valid(ancestor):
             return ancestor
+    for candidate in fallback_roots:
+        root = Path(candidate)
+        if _valid(root):
+            return root
     return None
+
+
+def _resolve_collection_root(source: Path, graph_ref: str, explicit_root: str | Path | None) -> Path | None:
+    return resolve_poryos_sidecar_root(source, graph_ref, explicit_root)
 
 
 def _verify_sha256(path: Path, expected: str, label: str) -> None:

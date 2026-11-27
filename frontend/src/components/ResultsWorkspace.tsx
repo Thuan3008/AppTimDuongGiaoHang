@@ -177,7 +177,11 @@ export function ResultsWorkspace({
   const evaluationNote = activeResult
     ? isDriver
       ? "Tổng thời gian giao hàng dự kiến gồm thời gian di chuyển và phục vụ, tính từ lúc khởi hành đến khi về kho. Thời gian thực tế có thể thay đổi theo quá trình giao hàng."
-      : `Nghiệm đang hiển thị thuộc seed ${activeResult.seed ?? "không xác định"} · Thời gian từ dataset · Departure evaluator: ${activeResult.departure_time_mode}. Đường OSRM chỉ phục vụ hiển thị và có thể khác đường thực nghiệm. Duration gồm thời gian từ khởi hành đến về kho; objective = di chuyển + phục vụ.`
+      : `${
+          activeResult.seed != null
+            ? `Nghiệm đang hiển thị thuộc seed ${activeResult.seed}`
+            : "Nghiệm chạy tất định (không dùng seed)"
+        } · Thời gian từ dataset · Departure evaluator: ${activeResult.departure_time_mode}. Đường OSRM chỉ phục vụ hiển thị và có thể khác đường thực nghiệm. Duration gồm thời gian từ khởi hành đến về kho; objective = di chuyển + phục vụ.`
     : "Thời gian từ dataset · Objective = di chuyển + phục vụ. Bấm vào hàng để xem riêng từng tuyến."
 
   return (
@@ -865,8 +869,8 @@ export function ResultsWorkspace({
           <CardHeader>
             <CardTitle>Kết quả cùng lượt chạy</CardTitle>
             <CardDescription className="text-xs">
-              RAPO dùng departure exact; Pufferfish và GA xuất trace với
-              departure quét lưới.
+              RAPO dùng departure exact; các thuật toán đối chứng (ARO-Original,
+              POA-Original, GA, GA-LS, Greedy) xuất trace với departure quét lưới.
             </CardDescription>
           </CardHeader>
           <CardContent>

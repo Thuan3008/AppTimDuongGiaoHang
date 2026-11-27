@@ -53,6 +53,10 @@ interface DispatchSidebarProps {
   catalog: DatasetEntry[]
   tripName: string
   dataset: string
+  csvMode: boolean
+  csvImporting: boolean
+  csvFileName: string | null
+  csvSummary: string | null
   manualMode: boolean
   manualVehicles: string
   manualCapacity: string
@@ -83,6 +87,7 @@ interface DispatchSidebarProps {
   onDepotAddressInput: (address: string) => void
   onDepotCoordInput: (field: "lat" | "lon", value: string) => void
   onResolveDepot: () => void
+  onAutoResolveDepot: () => void
   onSelectDepotCandidate: (candidate: GeocodeCandidate) => void
   onPickDepotOnMap: () => void
   onAddPoint: () => void
@@ -91,9 +96,13 @@ interface DispatchSidebarProps {
   onPointAddressInput: (uid: string, address: string) => void
   onPointCoordInput: (uid: string, field: "lat" | "lon", value: string) => void
   onResolvePoint: (uid: string) => void
+  onAutoResolvePoint: (uid: string) => void
   onSelectPointCandidate: (uid: string, candidate: GeocodeCandidate) => void
   onPickPointOnMap: (uid: string, index: number) => void
   onPreviewPoints: () => void
+  onImportCsv: (file: File) => void
+  onDownloadCsvTemplate: () => void
+  onConfirmAllSuggested: () => void
   onToggleAlgorithm: (name: string) => void
   onPopulationChange: (value: string) => void
   onBudgetChange: (value: string) => void
@@ -130,6 +139,10 @@ export function DispatchSidebar({
   catalog,
   tripName,
   dataset,
+  csvMode,
+  csvImporting,
+  csvFileName,
+  csvSummary,
   manualMode,
   manualVehicles,
   manualCapacity,
@@ -160,6 +173,7 @@ export function DispatchSidebar({
   onDepotAddressInput,
   onDepotCoordInput,
   onResolveDepot,
+  onAutoResolveDepot,
   onSelectDepotCandidate,
   onPickDepotOnMap,
   onAddPoint,
@@ -168,9 +182,13 @@ export function DispatchSidebar({
   onPointAddressInput,
   onPointCoordInput,
   onResolvePoint,
+  onAutoResolvePoint,
   onSelectPointCandidate,
   onPickPointOnMap,
   onPreviewPoints,
+  onImportCsv,
+  onDownloadCsvTemplate,
+  onConfirmAllSuggested,
   onToggleAlgorithm,
   onPopulationChange,
   onBudgetChange,
@@ -262,8 +280,8 @@ export function DispatchSidebar({
                 </label>
                 <select
                   id="dataset"
-                  value={dataset}
-                  disabled={busy}
+                  value={csvMode ? "__csv_hcmc__" : dataset}
+                  disabled={busy || csvImporting}
                   onChange={(e) => onDatasetChange(e.target.value)}
                   className="h-8 w-full rounded-lg border border-input bg-background px-2.5 text-sm text-foreground outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50"
                 >
@@ -278,6 +296,16 @@ export function DispatchSidebar({
                       </option>
                     )
                   })}
+                  <option
+                    value="__csv_hcmc__"
+                    disabled={
+                      !catalog.some(
+                        (ds) => ds.id.startsWith("hcmc") && ds.missing.length === 0
+                      )
+                    }
+                  >
+                    Nhập từ file CSV · nền giao thông TP.HCM
+                  </option>
                 </select>
               </div>
 
@@ -286,7 +314,7 @@ export function DispatchSidebar({
                   id="manual-toggle"
                   type="checkbox"
                   checked={manualMode}
-                  disabled={busy}
+                  disabled={busy || csvImporting}
                   onChange={(e) => onManualModeChange(e.target.checked)}
                   className="size-4 rounded border-input accent-primary"
                 />
@@ -296,6 +324,10 @@ export function DispatchSidebar({
               {manualMode && (
                 <ManualPointsEditor
                   disabled={busy}
+                  csvMode={csvMode}
+                  csvImporting={csvImporting}
+                  csvFileName={csvFileName}
+                  csvSummary={csvSummary}
                   manualVehicles={manualVehicles}
                   manualCapacity={manualCapacity}
                   manualServiceMinutes={manualServiceMinutes}
@@ -309,6 +341,7 @@ export function DispatchSidebar({
                   onDepotAddressInput={onDepotAddressInput}
                   onDepotCoordInput={onDepotCoordInput}
                   onResolveDepot={onResolveDepot}
+                  onAutoResolveDepot={onAutoResolveDepot}
                   onSelectDepotCandidate={onSelectDepotCandidate}
                   onPickDepotOnMap={onPickDepotOnMap}
                   onAddPoint={onAddPoint}
@@ -317,9 +350,13 @@ export function DispatchSidebar({
                   onPointAddressInput={onPointAddressInput}
                   onPointCoordInput={onPointCoordInput}
                   onResolvePoint={onResolvePoint}
+                  onAutoResolvePoint={onAutoResolvePoint}
                   onSelectPointCandidate={onSelectPointCandidate}
                   onPickPointOnMap={onPickPointOnMap}
                   onPreviewPoints={onPreviewPoints}
+                  onImportCsv={onImportCsv}
+                  onDownloadCsvTemplate={onDownloadCsvTemplate}
+                  onConfirmAllSuggested={onConfirmAllSuggested}
                 />
               )}
 
@@ -350,6 +387,11 @@ export function DispatchSidebar({
                     )
                   })}
                 </div>
+                {selectedAlgorithms.includes("Greedy") && (
+                  <p className="text-[11px] text-muted-foreground">
+                    Greedy là heuristic tất định (chạy 1 lần, không dùng P, NFE hay seed).
+                  </p>
+                )}
               </div>
 
               <div className="grid grid-cols-2 gap-2">
@@ -451,7 +493,7 @@ export function DispatchSidebar({
 
               <Button
                 type="button"
-                disabled={busy || !dataset || drivers.length === 0}
+                disabled={busy || csvImporting || !dataset || drivers.length === 0}
                 onClick={onStartOptimization}
                 className="w-full"
               >

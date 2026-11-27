@@ -8,6 +8,7 @@ nguyên logic tìm kiếm của chúng, nhưng chuyển kết quả về dạng
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, replace
 from functools import lru_cache
 from pathlib import Path
@@ -22,9 +23,11 @@ from algorithms.poa_original import POAOriginal
 from algorithms.pso_vns import PSOVNS
 from algorithms.td_rapo_pufferfish import TDRAPOPufferfish
 from core.data.evaluator import HCMCEvaluationResult, HCMCTDVRPEvaluator
+from core.data.load_poryos import resolve_poryos_sidecar_root
 from core.data.models import RoadEdge, RoadNode, TDVRPInstance, TrafficOverlay
 from core.models import Solution
 from core.tdvrp_common import TDVRPProblem
+from experiments.rapo_contribution.exact_greedy import run_exact_greedy
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -33,6 +36,7 @@ BASELINE_ALGORITHMS = (
     "GA-LS",
     "ARO-Original",
     "POA-Original",
+    "Greedy",
     "DPSO",
     "ILS-VND",
     "PSO-VNS",
@@ -59,9 +63,17 @@ class BaselineAdapterResult:
 @lru_cache(maxsize=16)
 def _load_legacy_problem(instance_path: str, vehicle_limit: int) -> TDVRPProblem:
     """Tạo problem tương thích một lần cho mỗi instance và chính sách fleet."""
+    source = Path(instance_path)
+    payload = json.loads(source.read_text(encoding="utf-8"))
+    graph_rel = payload["td"]["graph"]["path"]
+    fallbacks = tuple(ancestor / "MAMUT-routing-Poryos2026-main" for ancestor in source.parents)
+    collection_root = (
+        resolve_poryos_sidecar_root(source, graph_rel, fallback_roots=fallbacks)
+        or (ROOT / "data" / "TDVRP")
+    )
     return TDVRPProblem(
         instance_path,
-        collection_root=ROOT / "data" / "TDVRP",
+        collection_root=collection_root,
         vehicle_limit=vehicle_limit,
         search_route_limit=max(2 * vehicle_limit, vehicle_limit + 1),
     )
@@ -92,27 +104,43 @@ def run_baseline(
         "population_size": population_size,
         "max_function_evaluations": nfe_budget,
     }
-    implementations = {
-        "GA": GA(),
-        "GA-LS": GALS(),
-        "ARO-Original": AROOriginal(),
-        "POA-Original": POAOriginal(),
-        "DPSO": DPSO(),
-        "ILS-VND": ILSVND(),
-        "PSO-VNS": PSOVNS(),
-        "RAPO-Pufferfish": TDRAPOPufferfish(),
-    }
-    if algorithm == "ILS-VND":
-        # ILS-VND là thuật toán trajectory-based, không dùng population size.
-        config.pop("population_size")
+    if algorithm == "Greedy":
+        greedy = run_exact_greedy(legacy_problem)
+        routes = [list(route) for route in greedy.routes]
+        raw_metadata = {
+            "deterministic": True,
+            "construction_evaluations": int(greedy.construction_evaluations),
+        }
+        convergence = [float(greedy.fitness)]
+        runtime_seconds = float(greedy.runtime_seconds)
+        evaluations = int(greedy.construction_evaluations)
+    else:
+        implementations = {
+            "GA": GA(),
+            "GA-LS": GALS(),
+            "ARO-Original": AROOriginal(),
+            "POA-Original": POAOriginal(),
+            "DPSO": DPSO(),
+            "ILS-VND": ILSVND(),
+            "PSO-VNS": PSOVNS(),
+            "RAPO-Pufferfish": TDRAPOPufferfish(),
+        }
+        if algorithm == "ILS-VND":
+            # ILS-VND là thuật toán trajectory-based, không dùng population size.
+            config.pop("population_size")
 
-    raw = implementations[algorithm].optimize(
-        legacy_problem,
-        config=config,
-        seed=seed,
-        initial_population=initial_population,
-    )
-    routes = [list(route) for route in raw.routes]
+        raw = implementations[algorithm].optimize(
+            legacy_problem,
+            config=config,
+            seed=seed,
+            initial_population=initial_population,
+        )
+        routes = [list(route) for route in raw.routes]
+        raw_metadata = dict(raw.metadata)
+        convergence = list(raw.convergence_curve)
+        runtime_seconds = float(raw.runtime_seconds)
+        evaluations = int(raw.nfe)
+
     solution = Solution(routes)
     # Baseline source dùng chính sách unlimited nonempty routes giống
     # RAPO-2709. Bản Poryos gốc vẫn lưu num_vehicles=4, nên dùng bản view
@@ -120,14 +148,15 @@ def run_baseline(
     trace_instance = replace(instance, num_vehicles=len(routes))
     horizon_end = float(instance.horizon[1])
     window_end = min(horizon_end, latest_time) if latest_time is not None else horizon_end
+    use_fixed_departure = window_end <= start_time
     evaluator = HCMCTDVRPEvaluator(
         trace_instance,
         graph,
         traffic,
         start_time=start_time,
-        departure_time_mode="optimize",
+        departure_time_mode="fixed" if use_fixed_departure else "optimize",
         departure_time_step=instance.sample_step,
-        departure_time_window=(start_time, max(start_time, window_end)),
+        departure_time_window=None if use_fixed_departure else (start_time, window_end),
     )
     evaluation = evaluator.evaluate(solution)
     solution.fitness = evaluation.fitness
@@ -135,7 +164,7 @@ def run_baseline(
     solution.total_distance = evaluation.total_distance
     solution.total_travel_time = evaluation.total_travel_time
     solution.is_feasible = evaluation.feasible
-    metadata = dict(raw.metadata)
+    metadata = dict(raw_metadata)
     metadata.update(
         {
             "algorithm": algorithm,
@@ -148,8 +177,8 @@ def run_baseline(
     return BaselineAdapterResult(
         best_solution=solution,
         best_evaluation=evaluation,
-        convergence=list(raw.convergence_curve),
-        runtime_seconds=float(raw.runtime_seconds),
-        evaluations=int(raw.nfe),
+        convergence=convergence,
+        runtime_seconds=runtime_seconds,
+        evaluations=evaluations,
         metadata=metadata,
     )
